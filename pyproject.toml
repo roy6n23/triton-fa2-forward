@@ -1,0 +1,16 @@
+[project]
+name = "triton-fa2-forward"
+version = "0.1.0"
+license = "MIT"
+description = "FlashAttention-2 style forward kernel in Triton (causal, FP16/BF16, GQA)"
+requires-python = ">=3.10"
+dependencies = ["torch>=2.5", "triton>=3.0"]
+
+[project.optional-dependencies]
+test = ["pytest"]
+# Benchmark baselines. Both are optional: bench.py skips a provider it cannot import.
+bench = ["flashinfer-python", "flash-attn"]
+
+[tool.pytest.ini_options]
+pythonpath = ["."]
+testpaths = ["tests"]
