@@ -11,6 +11,11 @@ test = ["pytest"]
 # Benchmark baselines. Both are optional: bench.py skips a provider it cannot import.
 bench = ["flashinfer-python", "flash-attn"]
 
+[tool.setuptools]
+# bench/ is a script directory, not a package; without this, setuptools' flat-layout
+# discovery sees two top-level packages and refuses `pip install -e .`
+packages = ["fa2"]
+
 [tool.pytest.ini_options]
 pythonpath = ["."]
 testpaths = ["tests"]

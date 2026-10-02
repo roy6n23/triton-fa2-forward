@@ -8,10 +8,10 @@ It comes with a pure-PyTorch mirror of the same algorithm, a correctness suite
 graded against PyTorch's own error, and a benchmark against FlashInfer, cuDNN
 and flash-attn.
 
-> **Status (2026-09-22):** the algorithm and the kernel pass the correctness
-> suite under Triton's CPU interpreter (`TRITON_INTERPRET=1`, 63 passed). CI
-> reruns it on every push. **No GPU run has happened yet**, so there are no
-> performance numbers yet, and BF16 is not verified yet (see [WORKLOG](WORKLOG.md), 2026-09-22).
+> **Status (2026-10-02):** first GPU run done on an H100 SXM (RunPod). The full
+> suite passes on real hardware, BF16 included (77 passed). Results and the stack
+> are below; the CPU interpreter suite still runs in CI on every push
+> (see [WORKLOG](WORKLOG.md), 2026-10-02).
 
 ## Layout
 
@@ -117,13 +117,38 @@ The baselines are FlashInfer, cuDNN (via SDPA), flash-attn FA2, FA3 on Hopper,
 and SDPA's flash backend. A comparison against torch SDPA alone would be a 2023
 comparison.
 
-**Results: pending first GPU run.** Default shape: Llama-3-8B attention
-(H_q=32, H_kv=8, D=128), batch 1, causal, N from 512 to 16384.
+**Results (2026-10-02, H100 80GB HBM3 SXM, driver 580.126.09, CUDA 13.0, torch
+2.13.0+cu130, Triton 3.7.1, FlashInfer 0.6.18.post1).** Default shape: Llama-3-8B
+attention (H_q=32, H_kv=8, D=128), batch 1, causal. Median TFLOP/s (IQR in ms);
+flash-attn and FA3 were not installed on the box, so they are absent. These runs
+used the earlier 8 warps x 2 stages config:
+
+| N | triton-fa2 | sdpa-flash | sdpa-cudnn | flashinfer |
+|---|---|---|---|---|
+| 512 | 87.0 (0.000) | 82.7 (0.000) | 114.9 (0.000) | 24.4 (0.067) |
+| 1024 | 146.5 (0.001) | 140.1 (0.001) | 232.2 (0.001) | 237.6 (0.000) |
+| 2048 | 230.9 (0.001) | 204.2 (0.009) | 383.7 (0.002) | 397.7 (0.000) |
+| 4096 | 303.3 (0.001) | 271.8 (0.012) | 517.8 (0.002) | 541.8 (0.001) |
+| 8192 | 360.7 (0.002) | 320.9 (0.030) | 604.1 (0.004) | 632.7 (0.001) |
+| 16384 | 389.5 (0.076) | 342.1 (0.080) | 595.1 (0.101) | 590.5 (0.041) |
+
+FP16 above; BF16 is within 1-2% at every N (390.1 TFLOP/s at N=16384,
+`bench/results/NVIDIA-H100-80GB-HBM3_bf16_2026-10-02.json`). The kernel is ahead of
+SDPA's FA2 backend at every length (+5% to +14%) and 35-45% behind cuDNN and
+FlashInfer from N=4096 up, which are Hopper-specific (WGMMA/TMA) kernels; the FA3 section below is about
+exactly that gap.
+
+**Occupancy (D=128, 8 warps x 2 stages):** 184 registers per thread, no spills,
+96 KB shared. Registers limit it to 1 block per SM (65536 / (184 x 32 x 8) = 1.4).
+A num_warps x num_stages sweep at N=4096 and 16384 found 8 x 4 fastest:
+349.6 and 415.9 TFLOP/s (+14% and +13%), with the same max error. That is now
+the D=128 default; the full N range has not been re-benchmarked with it yet.
 
 ## Limitations
 
 - Forward only. There is no backward and no dropout.
-- Configs are untuned starting points (`_default_config`); there is no autotuning.
+- Only the D=128 config was tuned (one sweep, two lengths); the rest are starting
+  points, and there is no autotuning.
 - Causal assumes `N_q == N_kv`, i.e. prefill. Decode-style bottom-right alignment,
   variable-length batches and paged KV are out of scope.
 - GQA maps heads but does not *pack* them. Each query head's program reloads

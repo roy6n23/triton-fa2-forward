@@ -157,13 +157,15 @@ def _attn_fwd(
 
 
 def _default_config(head_dim, on_cuda):
-    """(BLOCK_M, BLOCK_N, num_warps, num_stages). Untuned starting points."""
+    """(BLOCK_M, BLOCK_N, num_warps, num_stages). D=128 picked by an H100 sweep (WORKLOG 2026-10-02);
+    the rest are untuned starting points."""
     if not on_cuda:
         # TRITON_INTERPRET=1 on CPU: small tiles keep the numpy emulation fast.
         return 32, 16, 1, 1
     if head_dim <= 64:
         return 128, 64, 4, 3
-    return 128, 64, 8, 2
+    # 8 warps x 4 stages: 13-14% over 8x2 at N=4096 and 16384 on H100 (fp16, causal)
+    return 128, 64, 8, 4
 
 
 def attention(q, k, v, causal=True, sm_scale=None, block_m=None, block_n=None,

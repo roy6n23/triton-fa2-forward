@@ -197,7 +197,7 @@ def main():
     ap.add_argument("--iters", type=int, default=20)
     ap.add_argument("--no-flush", action="store_true")
     ap.add_argument("--providers", nargs="+", default=list(PROVIDERS))
-    ap.add_argument("--out", default=None, help="JSON path (default: bench/results/<gpu>_<date>.json)")
+    ap.add_argument("--out", default=None, help="JSON path (default: bench/results/<gpu>_<dtype>_<date>.json)")
     args = ap.parse_args()
 
     assert torch.cuda.is_available(), "benchmark needs a CUDA GPU"
@@ -249,7 +249,7 @@ def main():
 
     out = args.out or os.path.join(
         os.path.dirname(__file__), "results",
-        f"{env['gpu'].replace(' ', '-')}_{env['date'][:10]}.json",
+        f"{env['gpu'].replace(' ', '-')}_{args.dtype}_{env['date'][:10]}.json",
     )
     os.makedirs(os.path.dirname(out), exist_ok=True)
     with open(out, "w") as f:
