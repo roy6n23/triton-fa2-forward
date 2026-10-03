@@ -92,8 +92,9 @@ The suite is checked against bugs deliberately planted in the kernel.
 Dropping the `alpha` rescale of `acc` fails 26 of the kernel tests. A
 causal mask that is off by one (`>` instead of `>=`) fails all 19 causal tests.
 
-Interpreter results so far (CPU, `D=64`). The interpreter's `tl.dot` is more
-exact than real tensor cores, so these ratios are optimistic until the GPU run:
+Interpreter results (CPU, `D=64`), recorded on 2026-09-22, before the GPU run.
+The interpreter's `tl.dot` is more exact than real tensor cores, so these ratios
+are optimistic and are not GPU measurements:
 
 | causal | heads q/kv | N | ours max-abs | torch max-abs | ratio |
 |---|---|---|---|---|---|
@@ -101,6 +102,13 @@ exact than real tensor cores, so these ratios are optimistic until the GPU run:
 | yes | 4/1 | 128 | 7.94e-4 | 7.94e-4 | 1.00 |
 | no | 4/4 | 128 | 2.71e-4 | 2.77e-4 | 0.98 |
 | no | 4/1 | 128 | 2.75e-4 | 2.50e-4 | 1.10 |
+
+The GPU run then applied the same 2× bar on real tensor cores. On the H100
+(2026-10-02), `pytest` reported 77 passed, including both BF16 cases, which the
+interpreter has to skip. In that run's num_warps x num_stages sweep (D=128,
+FP16, causal, N=4096 and 16384), the max abs error vs SDPA was 4.88e-4 in every
+config ([WORKLOG](WORKLOG.md), 2026-10-02). That number is a direct difference
+from SDPA's output, not the fp64-referenced error in the table above.
 
 ## Benchmark protocol
 
@@ -200,7 +208,8 @@ for a portable Triton kernel like this one on Blackwell.
 
 **Boundary:** everything in points 2–3 is a known next step, not something
 implemented here. This kernel targets Ampere/Hopper-class GPUs, and its first
-real-hardware validation is still pending.
+real-hardware validation was an H100 run on 2026-10-02 (see
+[Results](#benchmark-protocol) and [WORKLOG](WORKLOG.md)).
 
 ## References
 
