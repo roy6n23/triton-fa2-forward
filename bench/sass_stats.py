@@ -8,7 +8,7 @@ barriers sit. The kernel's registers, spills and shared memory come from cuobjdu
 Usage:
   TRITON_INTERPRET=0 python bench/sass_stats.py                  # D=128 default config, fp16, causal
   python bench/sass_stats.py --pack 4 --dump sass.txt            # GQA-packed variant, keep the SASS
-  python bench/sass_stats.py --variant ffma_scale+even_n         # a variant from bench/ablation.py
+  python bench/sass_stats.py --variant before_fixes              # a variant from bench/ablation.py
   python bench/sass_stats.py --from-cache                        # on a GPU: the kernel a launch compiled
 """
 
@@ -193,14 +193,15 @@ def compile_aot(args):
 
     bm, bn, nw, ns = _default_config(args.head_dim, on_cuda=True)
     constexprs = dict(dtype=args.dtype, GQA_GROUP=args.group, PACK=args.pack, HEAD_DIM=args.head_dim,
-                      BLOCK_M=bm, BLOCK_N=bn, CAUSAL=not args.no_causal)
+                      BLOCK_M=bm, BLOCK_N=bn, CAUSAL=not args.no_causal, EVEN_N=not args.odd_n)
     fn = _attn_fwd
     if args.variant:
         from ablation import KNOBS, VARIANTS, _attn_fwd_ablate
 
         fn = _attn_fwd_ablate
         on = VARIANTS[args.variant]
-        constexprs.update({k.upper(): k in on for k in KNOBS})
+        constexprs.update({k.upper(): k in on for k in KNOBS if k != "mask_every_tile"})
+        constexprs["EVEN_N"] = constexprs["EVEN_N"] and "mask_every_tile" not in on
     sig, consts, attrs = _signature(fn, constexprs)
     src = ASTSource(fn=fn, signature=sig, constexprs=consts, attrs=attrs)
     return triton.compile(src, target=GPUTarget("cuda", 90, 32), options={"num_warps": nw, "num_stages": ns})
@@ -241,6 +242,7 @@ def main():
     ap.add_argument("--pack", type=int, default=1, help="heads per program: 1, or the group to pack")
     ap.add_argument("--dtype", choices=["fp16", "bf16"], default="fp16")
     ap.add_argument("--no-causal", action="store_true")
+    ap.add_argument("--odd-n", action="store_true", help="N_kv not a multiple of BLOCK_N (keeps the end mask)")
     ap.add_argument("--from-cache", action="store_true", help="compile with a real launch (needs a GPU)")
     ap.add_argument("--variant", help="compile this variant of bench/ablation.py instead (ahead of time only)")
     ap.add_argument("--dump", help="also write the full SASS here")

@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# Nsight Compute on the kernel, two knockouts and FA3 (GPU box). Needs access to the GPU performance
+# Nsight Compute on the kernel, two knockouts, the kernel before its 2026-10-03 fixes, and FA3 (GPU box). Needs access to the GPU performance
 # counters: in a container that is the host's call (NVreg_RestrictProfilingToAdminUsers=0), and ncu fails
 # with ERR_NVGPUCTRPERM without it.
 #
@@ -30,5 +30,5 @@ prof() {   # prof NAME KERNEL_REGEX [profile_target.py args...]
 prof triton-fa2 '^_attn_fwd$'
 prof matmul_only '_attn_fwd_ablate' --variant matmul_only
 prof no_exp '_attn_fwd_ablate' --variant no_exp
-prof ffma_even_n '_attn_fwd_ablate' --variant ffma_scale+even_n
+prof before_fixes '_attn_fwd_ablate' --variant before_fixes
 prof fa3-vllm 'FlashAttnFwdSm90' --provider fa3-vllm

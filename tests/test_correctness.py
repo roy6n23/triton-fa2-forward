@@ -196,3 +196,13 @@ def test_should_pack_gqa_follows_tile_efficiency():
     assert not should_pack_gqa(1000, 4, 128)           # 1000/1024 vs 4000/4096: no gain
     assert not should_pack_gqa(64, 1, 128)             # MHA: nothing to pack
     assert not should_pack_gqa(64, 3, 128)             # group 3 does not divide 128
+
+
+@needs_kernel
+def test_sm_scale_must_be_positive():
+    """The row max is taken on unscaled scores and scaled afterwards, which needs a positive scale."""
+    from fa2.kernel import attention
+
+    q, k, v = make_qkv(BATCH, 4, 2, 16, 16, 64, torch.float16)
+    with pytest.raises(ValueError, match="sm_scale"):
+        attention(q, k, v, sm_scale=-0.125)

@@ -174,10 +174,30 @@ tensor cores wait, costs twice that, and the matmul schedule itself loses anothe
 16%. Counting instructions per tile told me that before any timing did.
 
 **Open:**
-- [ ] Put `even_n` and `ffma_scale` into the kernel, then rerun the table.
+- [x] Put `even_n` and `ffma_scale` into the kernel (2026-10-03, entry below).
+- [ ] Rerun the table with them.
 - [ ] Nsight Compute on a machine with counter access: tensor-pipe utilization and
   stall reasons per instruction, to check the breakdown.
 - [ ] Overlap softmax and matmul: Triton's warp specialization, or a two-warpgroup
   ping-pong.
 - [ ] Why FA3 is 1.27x faster at N_q = 64 in the packing table (split-KV? tile shape?).
+
+## 2026-10-03: the two fixes go into the kernel (no GPU)
+
+`EVEN_N` (no end-of-sequence mask when N_kv % BLOCK_N == 0) and the FFMA scale are
+now in `fa2/kernel.py`, written exactly as in the knockout copy that was timed on the
+H100. The copy's switches now run the other way: `scale_first` and `mask_every_tile`
+undo the fixes, and `before_fixes` (both) reproduces the kernel at e4b8e5e bit for
+bit under the interpreter, packed and unpacked, causal and not.
+
+Not rerun on a GPU. What stands in for it: the kernel's ahead-of-time sm_90 build is
+the same SASS, instruction for instruction, as the `ffma_scale+even_n` variant that
+was timed at -8.6% to -10.0% (1992 instructions, 371 in the stage-1 loop). That
+build uses Triton 3.8.0 on the Mac, the box had 3.7.1; for the original kernel the two
+builds had the same 447 instructions in the stage-1 loop and differed slightly
+elsewhere (565 vs 567 in stage 2, 183 vs 185 registers). So this is good evidence,
+not a measurement. The results table is still the e4b8e5e one and says so.
+
+`attention()` now rejects sm_scale <= 0: the row max is taken before scaling, which
+is only the max of the scaled scores when the scale is positive.
 

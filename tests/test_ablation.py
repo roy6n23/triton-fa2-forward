@@ -34,15 +34,15 @@ def test_knockouts_change_the_output(knob):
     assert not torch.equal(attention_ablate(q, k, v, **{knob: True}), attention(q, k, v))
 
 
-@pytest.mark.parametrize("knobs", [{"ffma_scale": True}, {"even_n": True}, {"ffma_scale": True, "even_n": True}])
+@pytest.mark.parametrize("knobs", [{"scale_first": True}, {"mask_every_tile": True},
+                                   {"scale_first": True, "mask_every_tile": True}])
 @pytest.mark.parametrize("causal", [True, False])
-def test_candidate_optimizations_are_still_attention(knobs, causal):
+def test_the_kernel_before_its_two_fixes_is_still_attention(knobs, causal):
     from bench import ablation
 
     q, k, v = make_qkv(BATCH, 4, 2, 128, 128, 64, torch.float16)
-    original = ablation.attention_ablate
 
     def run(q, k, v, causal):
-        return original(q, k, v, causal=causal, **knobs)
+        return ablation.attention_ablate(q, k, v, causal=causal, **knobs)
 
     check_against_torch(q, k, v, causal, _impl=run)

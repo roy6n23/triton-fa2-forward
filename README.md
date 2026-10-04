@@ -11,8 +11,10 @@ cuDNN, FlashInfer and PyTorch SDPA, and a breakdown of where the kernel's time g
 > **Status (2026-10-03):** second H100 SXM run (RunPod), 115 tests pass on the GPU.
 > The default D=128 config is now 8 warps × 4 stages, GQA head packing is in, the
 > FA2/FA3 baselines are measured, and the time per K/V tile is broken down below.
-> Nsight Compute could not run in the rented container (no access to the GPU's
-> performance counters); its script is ready ([WORKLOG](WORKLOG.md), 2026-10-03).
+> Two fixes that breakdown found are now in the kernel; they were timed in a copy of
+> it, and the table has not been rerun with them yet. Nsight Compute could not run in
+> the rented container (no access to the GPU's performance counters); its script is
+> ready ([WORKLOG](WORKLOG.md), 2026-10-03).
 
 ## Layout
 
@@ -79,8 +81,9 @@ torch. [`fa2/kernel.py:_attn_fwd_inner`](fa2/kernel.py) is the same loop in Trit
 |---|---|
 | **Q tiles on the grid, K/V in the inner loop** (FA2 order) | Each program owns its output rows outright, so programs never communicate or merge partial results. The grid also spans the sequence dimension, which keeps SMs busy at batch 1. |
 | **Normalise once, after the loop** | `acc` stays unnormalised inside the loop, and the divide by `l` happens once per row. Non-matmul FLOPs run on much slower units than tensor-core matmuls, so cutting them matters even though the total FLOP count barely changes. |
-| **Causal block skipping in two stages** | Tiles fully left of the diagonal need no causal mask (stage 1). Only the `BLOCK_M`-wide diagonal band pays for it (stage 2). Tiles right of it are never loaded or multiplied. For long sequences that removes about half the work. (Stage 1 still applies the end-of-sequence mask; see [Where the time goes](#where-the-time-goes).) |
-| **`exp2` with `log2 e` folded into the scale** | `exp(x) = exp2(x·log2 e)`. One multiply at setup turns every exponential into a single hardware `exp2`. |
+| **Causal block skipping in two stages** | Tiles fully left of the diagonal need no causal mask (stage 1). Only the `BLOCK_M`-wide diagonal band pays for it (stage 2). Tiles right of it are never loaded or multiplied. For long sequences that removes about half the work. |
+| **`exp2`, with `log2 e` and the softmax scale in one FFMA** | `exp(x) = exp2(x·log2 e)`, so every exponential is a single hardware `exp2`. The row max is taken on the raw scores and scaled once per row, so each score costs one FFMA, `qk·scale − m`, instead of a multiply and a subtract. This needs scale > 0. |
+| **No end-of-sequence mask when N_kv is a multiple of BLOCK_N** (`EVEN_N`) | No tile then reaches past the end, and stage 1 drops the 32 selects per tile it otherwise spends on that mask. With the FFMA above, one K/V tile goes from 447 to 371 instructions ([Where the time goes](#where-the-time-goes)). |
 | **P cast back to FP16/BF16 before `P @ V`** | Keeps the second matmul on tensor cores. The statistics `m`, `l` and the accumulator stay in FP32. |
 | **GQA by index mapping** (`kv_head = q_head // group`) | No K/V replication in memory, and it is a single integer divide per program. |
 | **GQA head packing when it fills tiles better** | A group's query heads can share one program: row r of the tile is position r // G of head r % G, so each K/V tile serves the whole group. `attention()` does this when it fills the `BLOCK_M` rows at least 10% better (FA3's rule). It is what makes few queries per head against a long K/V fast ([below](#gqa-head-packing)). |
@@ -167,6 +170,10 @@ stages. Median TFLOP/s; the IQRs and the full environment are in
 - **vs the 2026-10-02 run** (8 warps x 2 stages, same box type and stack): +10% to
   +13% at every N, from the 8 x 4 config the sweep picked
   (`bench/results/NVIDIA-H100-80GB-HBM3_bf16_2026-10-02.json` for that run's BF16).
+- **Not yet in this table:** the two fixes from [Where the time goes](#where-the-time-goes).
+  The table was measured at commit e4b8e5e, before they went in. A copy of the kernel
+  with them ran 8.6% to 10.0% faster, and the kernel now compiles to exactly that copy's
+  SASS, so expect about 9% more; the next GPU run reruns the table.
 
 **Occupancy (D=128, 8 warps x 4 stages):** 183 registers per thread, no spills,
 160 KiB of shared memory. Both cap it at one CTA (two warpgroups) per SM.
@@ -175,7 +182,10 @@ stages. Median TFLOP/s; the IQRs and the full environment are in
 
 At N=16384 the kernel runs at about 430 TFLOP/s, 43% of the H100's 989.4. Nsight
 Compute could not run in the rented container, so the breakdown below comes from
-three sources that need no hardware counters.
+three sources that need no hardware counters. Everything in this section was
+measured on the kernel as of commit e4b8e5e, before the two fixes at the end of the
+section went in (`bench/ablation.py --variant before_fixes` still runs that kernel,
+bit for bit).
 
 **1. The clock.** Under this kernel the GPU sits at its 700 W power cap
 (`nvidia-smi` throttle reason "SW power cap" in 74 of 75 samples over 15 s) and the
@@ -235,20 +245,21 @@ from L2, the matmuls reach only 74% of the clock-adjusted peak: each iteration w
 for Q K^T before it can compute P, and both warpgroups wait at the same barriers.
 HBM traffic matters little at this size.
 
-**Two fixes the SASS points to, measured but not in the kernel yet**
-(`bench/ablation.py`, variants `even_n` and `ffma_scale`):
-- Stage 1 still applies the end-of-sequence mask to every tile (the 32 `FSEL`).
-  When N_kv is a multiple of BLOCK_N, it can be skipped.
-- Fold the softmax scale into the exponent as one FFMA, `qk * scale - m`, as
+**Two fixes the SASS points to, now in the kernel:**
+- Stage 1 applied the end-of-sequence mask to every tile (the 32 `FSEL`). When N_kv
+  is a multiple of BLOCK_N, no tile reaches past the end, so it is skipped.
+- The softmax scale is folded into the exponent as one FFMA, `qk * scale - m`, as
   Triton's tutorial 06 does, instead of scaling every score first.
 
-Together they cut the stage-1 loop from 447 to 371 instructions (ahead-of-time
-build) and the time by 10.0%, 8.6% and 9.5% at N = 4096, 8192 and 16384 (452
-TFLOP/s at 16384), and they pass the same accuracy bar (`tests/test_ablation.py`). The structural fix is FA3's: overlap one warpgroup's softmax with the
+Together they cut the stage-1 loop from 447 to 371 instructions. Timed in the
+knockout copy on the H100, they made it 10.0%, 8.6% and 9.5% faster at N = 4096, 8192
+and 16384 (452 TFLOP/s at 16384), with the same accuracy. The kernel now compiles to
+exactly the SASS of that copy (ahead-of-time sm_90 build); its own table is the next
+GPU run. The structural fix is FA3's: overlap one warpgroup's softmax with the
 other's matmuls (ping-pong), and tile j's softmax with tile j+1's Q K^T.
 
 **Nsight Compute.** `bench/profile_ncu.sh` runs it with `--set full` on the kernel,
-two knockouts and FA3. It needs a machine where the profiler may read the GPU's
+two knockouts, the kernel before the two fixes, and FA3. It needs a machine where the profiler may read the GPU's
 counters, such as a VM or bare metal with root; in the RunPod container it stops at
 `ERR_NVGPUCTRPERM`. It would measure two things the reading above infers: how busy
 the tensor pipe is, and why warps stall, instruction by instruction.

@@ -31,7 +31,15 @@ Causal handling (FA2 block skipping), for a Q tile covering rows [lo_m, lo_m + B
     columns >= lo_m + BLOCK_M                      fully invisible -> never loaded (skipped)
 
 We work in base 2: exp(x) == exp2(x * log2(e)), so log2(e) is folded into the
-softmax scale once and every exponential becomes a single exp2 instruction.
+softmax scale once and every exponential becomes a single exp2 instruction. The
+scale is applied inside the exponent: the row max is taken on the raw scores
+Q_i K_j^T and scaled once per row, so each score costs one FFMA, qk * scale - m,
+on its way into exp2 (as in Triton's tutorial 06). That needs scale > 0.
+
+When N_kv is a multiple of BLOCK_N (EVEN_N), no tile reaches past the end of the
+sequence, and stage 1 and the non-causal loop drop the end-of-sequence mask. These
+two cut the stage-1 loop from 447 to 371 SASS instructions per K/V tile on H100
+(bench/sass_stats.py; README, "Where the time goes").
 
 GQA head packing (pack_gqa): the G query heads that share a KV head can share one
 program. Its BLOCK_M rows are then (position, head) pairs, row r -> position r // G,
@@ -54,9 +62,9 @@ def _attn_fwd_inner(
     acc, l_i, m_i, q,
     k_base, v_base, stride_kn, stride_kd, stride_vn, stride_vd,
     offs_m, offs_d, lo, hi, N_KV, qk_scale,
-    BLOCK_N: tl.constexpr, CAUSAL_MASK: tl.constexpr,
+    BLOCK_N: tl.constexpr, CAUSAL_MASK: tl.constexpr, PAD_MASK: tl.constexpr,
 ):
-    """Run the online-softmax recurrence over K/V columns [lo, hi)."""
+    """Run the online-softmax recurrence over K/V columns [lo, hi). PAD_MASK: a tile may reach past N_KV."""
     offs_n_base = tl.arange(0, BLOCK_N)
     for start_n in range(lo, hi, BLOCK_N):
         start_n = tl.multiple_of(start_n, BLOCK_N)
@@ -68,19 +76,24 @@ def _attn_fwd_inner(
             k_base + offs_d[:, None] * stride_kd + offs_n[None, :] * stride_kn,
             mask=col_ok[None, :], other=0.0,
         )
-        qk = tl.dot(q, k) * qk_scale  # [BLOCK_M, BLOCK_N], fp32
+        qk = tl.dot(q, k)  # [BLOCK_M, BLOCK_N], fp32, not yet scaled
 
         # Padding columns past the end of the sequence must not get probability mass.
-        visible = col_ok[None, :]
-        if CAUSAL_MASK:
-            visible = visible & (offs_m[:, None] >= offs_n[None, :])
-        qk = tl.where(visible, qk, float("-inf"))
+        if PAD_MASK:
+            visible = col_ok[None, :]
+            if CAUSAL_MASK:
+                visible = visible & (offs_m[:, None] >= offs_n[None, :])
+            qk = tl.where(visible, qk, float("-inf"))
+        elif CAUSAL_MASK:
+            qk = tl.where(offs_m[:, None] >= offs_n[None, :], qk, float("-inf"))
 
-        # Online-softmax update. m_new is always finite here: the first tile a row
-        # sees always contains column 0, which every row can see (stage 1 starts
-        # at 0, and stage 2 does whenever stage 1 is empty), so -inf - -inf never happens.
-        m_new = tl.maximum(m_i, tl.max(qk, 1))
-        p = tl.math.exp2(qk - m_new[:, None])
+        # Online-softmax update, in scaled base-2 units: max(qk) * scale == max(qk * scale) for
+        # scale > 0, so the scale costs one multiply per row here and an FFMA per score below.
+        # m_new is always finite: the first tile a row sees always contains column 0, which
+        # every row can see (stage 1 starts at 0, and stage 2 does whenever stage 1 is empty),
+        # so -inf - -inf never happens.
+        m_new = tl.maximum(m_i, tl.max(qk, 1) * qk_scale)
+        p = tl.math.exp2(qk * qk_scale - m_new[:, None])
         alpha = tl.math.exp2(m_i - m_new)
         l_i = l_i * alpha + tl.sum(p, 1)
 
@@ -106,7 +119,7 @@ def _attn_fwd(
     PACK: tl.constexpr,
     HEAD_DIM: tl.constexpr,
     BLOCK_M: tl.constexpr, BLOCK_N: tl.constexpr,
-    CAUSAL: tl.constexpr,
+    CAUSAL: tl.constexpr, EVEN_N: tl.constexpr,
 ):
     # --- which tile am I? --------------------------------------------------
     # PACK query heads share this program (1 = no packing, GQA_GROUP = a whole group).
@@ -140,11 +153,11 @@ def _attn_fwd(
         lo_m = start_m * (BLOCK_M // PACK)
         hi_m = lo_m + BLOCK_M // PACK
         stage1_end = (lo_m // BLOCK_N) * BLOCK_N
-        # stage 1: tiles strictly left of the diagonal band, no elementwise mask.
+        # stage 1: tiles strictly left of the diagonal band, no causal mask.
         acc, l_i, m_i = _attn_fwd_inner(
             acc, l_i, m_i, q, k_base, v_base, stride_kn, stride_kd, stride_vn, stride_vd,
             offs_m, offs_d, 0, stage1_end, N_KV, qk_scale,
-            BLOCK_N, False,
+            BLOCK_N, False, not EVEN_N,
         )
         # stage 2: the diagonal band, elementwise causal mask.
         # Everything to the right is skipped entirely (never loaded, never multiplied).
@@ -152,13 +165,13 @@ def _attn_fwd(
             acc, l_i, m_i, q, k_base, v_base, stride_kn, stride_kd, stride_vn, stride_vd,
             offs_m, offs_d, stage1_end, tl.minimum(hi_m, N_KV),
             N_KV, qk_scale,
-            BLOCK_N, True,
+            BLOCK_N, True, True,
         )
     else:
         acc, l_i, m_i = _attn_fwd_inner(
             acc, l_i, m_i, q, k_base, v_base, stride_kn, stride_kd, stride_vn, stride_vd,
             offs_m, offs_d, 0, N_KV, N_KV, qk_scale,
-            BLOCK_N, False,
+            BLOCK_N, False, not EVEN_N,
         )
 
     # --- normalise once, write the output once --------------------------------
@@ -226,6 +239,8 @@ def attention(q, k, v, causal=True, sm_scale=None, block_m=None, block_n=None,
 
     if sm_scale is None:
         sm_scale = 1.0 / math.sqrt(D)
+    if not sm_scale > 0:
+        raise ValueError(f"sm_scale must be positive (the row max is scaled after it is taken), got {sm_scale}")
     qk_scale = sm_scale * 1.4426950408889634  # log2(e): exp(x) == exp2(x * log2 e)
 
     out = torch.empty_like(q)
@@ -239,6 +254,7 @@ def attention(q, k, v, causal=True, sm_scale=None, block_m=None, block_n=None,
         HEAD_DIM=D,
         BLOCK_M=bm, BLOCK_N=bn,
         CAUSAL=causal,
+        EVEN_N=N_kv % bn == 0,
         num_warps=nw, num_stages=ns,
     )
     return out

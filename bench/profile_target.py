@@ -44,8 +44,9 @@ def main():
     k = torch.randn(1, args.hkv, args.seqlen, args.head_dim, device="cuda", dtype=dtype)
     v = torch.randn_like(k)
     if args.variant:
-        knobs = {kn: True for kn in ablation.VARIANTS[args.variant]}
-        fn = lambda: ablation.attention_ablate(q, k, v, causal=True, **knobs)   # noqa: E731
+        on = ablation.VARIANTS[args.variant]
+        knobs = {kn: True for kn in on if kn != "pack"}
+        fn = lambda: ablation.attention_ablate(q, k, v, causal=True, pack_gqa="pack" in on, **knobs)   # noqa: E731
     else:
         fn = bench.PROVIDERS[args.provider](q, k, v, True)
     for _ in range(args.launches):

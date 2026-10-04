@@ -3,16 +3,18 @@
 A copy of fa2/kernel.py's _attn_fwd with switches that each remove one kind of work, so the time that kind
 costs (the part not hidden behind the rest) is the difference to the unmodified copy:
 
-  no_exp       exp2 -> a subtraction: no MUFU work, everything else unchanged
-  no_softmax   no max, exp, sum, mask or rescale: acc += (Q K^T) V, the two matmuls and the loads only
-  kv_l2        every iteration loads the first K/V tile again: same instructions, but served from L2
-               instead of HBM, so the difference is what HBM traffic costs
+  no_exp           exp2 -> a subtraction: no MUFU work, everything else unchanged
+  no_softmax       no max, exp, sum, mask or rescale: acc += (Q K^T) V, the two matmuls and the loads only
+  kv_l2            every iteration loads the first K/V tile again: same instructions, but served from L2
+                   instead of HBM, so the difference is what HBM traffic costs
 
-and two candidate optimizations that the SASS suggests (fewer FP32 instructions per tile):
+and two switches that undo the kernel's two instruction-count fixes of 2026-10-03:
 
-  ffma_scale   fold the softmax scale into the exp argument, qk * scale - m (one FFMA), as Triton's
-               tutorial 06 does, instead of scaling every score and then subtracting
-  even_n       skip the end-of-sequence mask outside the last tile when N_kv % BLOCK_N == 0
+  scale_first      scale every score, then subtract the row max (two instructions per score), instead of
+                   one FFMA, qk * scale - m
+  mask_every_tile  apply the end-of-sequence mask to every tile, even when N_kv % BLOCK_N == 0
+
+before_fixes turns both on: the kernel as of commit e4b8e5e, which the 2026-10-03 measurements used.
 
 With every switch off the copy computes exactly what fa2.kernel.attention does (tests/test_ablation.py checks
 that bit for bit). The knockouts produce wrong attention outputs by design; only their time means anything.
@@ -37,16 +39,16 @@ import triton.language as tl
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), ".."))
 from fa2.kernel import _default_config  # noqa: E402
 
-KNOBS = ("no_exp", "no_softmax", "kv_l2", "ffma_scale", "even_n")
+KNOBS = ("no_exp", "no_softmax", "kv_l2", "scale_first", "mask_every_tile")
 VARIANTS = {                     # name -> switches on
     "copy": (),
     "no_exp": ("no_exp",),
     "no_softmax": ("no_softmax",),
     "kv_l2": ("kv_l2",),
     "matmul_only": ("no_softmax", "kv_l2"),
-    "ffma_scale": ("ffma_scale",),
-    "even_n": ("even_n",),
-    "ffma_scale+even_n": ("ffma_scale", "even_n"),
+    "scale_first": ("scale_first",),
+    "mask_every_tile": ("mask_every_tile",),
+    "before_fixes": ("scale_first", "mask_every_tile"),
     "pack": ("pack",),           # the copy with GQA head packing forced on
 }
 
@@ -57,7 +59,7 @@ def _inner(
     k_base, v_base, stride_kn, stride_kd, stride_vn, stride_vd,
     offs_m, offs_d, lo, hi, N_KV, qk_scale,
     BLOCK_N: tl.constexpr, CAUSAL_MASK: tl.constexpr, PAD_MASK: tl.constexpr,
-    NO_EXP: tl.constexpr, NO_SOFTMAX: tl.constexpr, KV_L2: tl.constexpr, FFMA_SCALE: tl.constexpr,
+    NO_EXP: tl.constexpr, NO_SOFTMAX: tl.constexpr, KV_L2: tl.constexpr, SCALE_FIRST: tl.constexpr,
 ):
     offs_n_base = tl.arange(0, BLOCK_N)
     for start_n in range(lo, hi, BLOCK_N):
@@ -73,10 +75,10 @@ def _inner(
             k_base + offs_d[:, None] * stride_kd + offs_ld[None, :] * stride_kn,
             mask=col_ok[None, :], other=0.0,
         )
-        if FFMA_SCALE:
-            qk = tl.dot(q, k)
-        else:
+        if SCALE_FIRST:
             qk = tl.dot(q, k) * qk_scale
+        else:
+            qk = tl.dot(q, k)
 
         if NO_SOFTMAX:
             p = qk
@@ -88,12 +90,12 @@ def _inner(
                 qk = tl.where(visible, qk, float("-inf"))
             elif CAUSAL_MASK:
                 qk = tl.where(offs_m[:, None] >= offs_n[None, :], qk, float("-inf"))
-            if FFMA_SCALE:
-                m_new = tl.maximum(m_i, tl.max(qk, 1) * qk_scale)
-                s = qk * qk_scale - m_new[:, None]
-            else:
+            if SCALE_FIRST:
                 m_new = tl.maximum(m_i, tl.max(qk, 1))
                 s = qk - m_new[:, None]
+            else:
+                m_new = tl.maximum(m_i, tl.max(qk, 1) * qk_scale)
+                s = qk * qk_scale - m_new[:, None]
             if NO_EXP:
                 p = s
                 alpha = m_i - m_new
@@ -124,7 +126,7 @@ def _attn_fwd_ablate(
     H_Q, N_Q, N_KV, qk_scale,
     GQA_GROUP: tl.constexpr, PACK: tl.constexpr, HEAD_DIM: tl.constexpr,
     BLOCK_M: tl.constexpr, BLOCK_N: tl.constexpr, CAUSAL: tl.constexpr,
-    NO_EXP: tl.constexpr, NO_SOFTMAX: tl.constexpr, KV_L2: tl.constexpr, FFMA_SCALE: tl.constexpr,
+    NO_EXP: tl.constexpr, NO_SOFTMAX: tl.constexpr, KV_L2: tl.constexpr, SCALE_FIRST: tl.constexpr,
     EVEN_N: tl.constexpr,
 ):
     start_m = tl.program_id(0)
@@ -157,18 +159,18 @@ def _attn_fwd_ablate(
         acc, l_i, m_i = _inner(
             acc, l_i, m_i, q, k_base, v_base, stride_kn, stride_kd, stride_vn, stride_vd,
             offs_m, offs_d, 0, stage1_end, N_KV, qk_scale,
-            BLOCK_N, False, not EVEN_N, NO_EXP, NO_SOFTMAX, KV_L2, FFMA_SCALE,
+            BLOCK_N, False, not EVEN_N, NO_EXP, NO_SOFTMAX, KV_L2, SCALE_FIRST,
         )
         acc, l_i, m_i = _inner(
             acc, l_i, m_i, q, k_base, v_base, stride_kn, stride_kd, stride_vn, stride_vd,
             offs_m, offs_d, stage1_end, tl.minimum(hi_m, N_KV), N_KV, qk_scale,
-            BLOCK_N, True, True, NO_EXP, NO_SOFTMAX, KV_L2, FFMA_SCALE,
+            BLOCK_N, True, True, NO_EXP, NO_SOFTMAX, KV_L2, SCALE_FIRST,
         )
     else:
         acc, l_i, m_i = _inner(
             acc, l_i, m_i, q, k_base, v_base, stride_kn, stride_kd, stride_vn, stride_vd,
             offs_m, offs_d, 0, N_KV, N_KV, qk_scale,
-            BLOCK_N, False, not EVEN_N, NO_EXP, NO_SOFTMAX, KV_L2, FFMA_SCALE,
+            BLOCK_N, False, not EVEN_N, NO_EXP, NO_SOFTMAX, KV_L2, SCALE_FIRST,
         )
 
     if NO_SOFTMAX:
@@ -186,8 +188,7 @@ def attention_ablate(q, k, v, causal=True, pack_gqa=False, **knobs):
     bm, bn, nw, ns = _default_config(D, q.is_cuda)
     group = H_q // H_kv
     pack = group if pack_gqa else 1
-    even_n = knobs.get("even_n", False)
-    assert not even_n or N_kv % bn == 0, "even_n needs N_kv % BLOCK_N == 0"
+    even_n = N_kv % bn == 0 and not knobs.get("mask_every_tile", False)
     out = torch.empty_like(q)
     grid = (triton.cdiv(N_q * pack, bm), B * H_q // pack)
     _attn_fwd_ablate[grid](
@@ -195,7 +196,7 @@ def attention_ablate(q, k, v, causal=True, pack_gqa=False, **knobs):
         H_q, N_q, N_kv, 1.0 / math.sqrt(D) * 1.4426950408889634,
         GQA_GROUP=group, PACK=pack, HEAD_DIM=D, BLOCK_M=bm, BLOCK_N=bn, CAUSAL=causal,
         NO_EXP=knobs.get("no_exp", False), NO_SOFTMAX=knobs.get("no_softmax", False),
-        KV_L2=knobs.get("kv_l2", False), FFMA_SCALE=knobs.get("ffma_scale", False), EVEN_N=even_n,
+        KV_L2=knobs.get("kv_l2", False), SCALE_FIRST=knobs.get("scale_first", False), EVEN_N=even_n,
         num_warps=nw, num_stages=ns,
     )
     return out
