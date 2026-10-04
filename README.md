@@ -28,6 +28,7 @@ bench/ablation.py    knockout copies of the kernel: time with one kind of work r
 bench/sass_stats.py  instructions per K/V tile and their schedule, from the SASS (no GPU needed)
 bench/profile_ncu.sh Nsight Compute on the kernel, two knockouts and FA3 (needs counter access)
 bench/gpu_session.sh every GPU measurement in one logged run; bench/results/<date>/ is its output
+bench/vm_session.sh  the same run on a VM with sudo, in the vLLM image with CAP_SYS_ADMIN, so ncu can run
 WORKLOG.md           what broke and how it was found
 .github/workflows/   CI: the test suite under TRITON_INTERPRET=1 on a CPU runner
 ```
