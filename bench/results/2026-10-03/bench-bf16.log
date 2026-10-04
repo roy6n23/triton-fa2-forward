@@ -1,0 +1,76 @@
+{
+  "gpu": "NVIDIA H100 80GB HBM3",
+  "compute_capability": "9.0",
+  "sm_count": 132,
+  "driver": "580.126.09",
+  "cuda": "13.0",
+  "cudnn": 92000,
+  "torch": "2.13.0+cu130",
+  "triton": "3.7.1",
+  "flash_attn": null,
+  "flashinfer": "0.6.18.post1",
+  "vllm": "0.30.0",
+  "python": "3.12.3",
+  "date": "2026-10-03T23:54:35"
+}
+  triton-fa2        N=   512     0.022 ms [IQR 0.022-0.022]    97.7 TFLOP/s  K/V  0.10 TB/s
+  sdpa-flash        N=   512     0.026 ms [IQR 0.026-0.027]    81.4 TFLOP/s  K/V  0.08 TB/s
+  sdpa-cudnn        N=   512     0.019 ms [IQR 0.019-0.019]   111.8 TFLOP/s  K/V  0.11 TB/s
+  skip flash-attn        N=   512: ModuleNotFoundError: No module named 'flash_attn'
+  skip flash-attn-3      N=   512: ModuleNotFoundError: No module named 'flash_attn_interface'
+  fa2-vllm          N=   512     0.027 ms [IQR 0.027-0.027]    80.0 TFLOP/s  K/V  0.08 TB/s
+  fa3-vllm          N=   512     0.022 ms [IQR 0.021-0.022]   100.1 TFLOP/s  K/V  0.10 TB/s
+  flashinfer        N=   512     0.017 ms [IQR 0.017-0.017]   125.8 TFLOP/s  K/V  0.12 TB/s
+  triton-fa2        N=  1024     0.053 ms [IQR 0.053-0.053]   161.8 TFLOP/s  K/V  0.08 TB/s
+  sdpa-flash        N=  1024     0.062 ms [IQR 0.062-0.063]   138.5 TFLOP/s  K/V  0.07 TB/s
+  sdpa-cudnn        N=  1024     0.037 ms [IQR 0.037-0.038]   229.7 TFLOP/s  K/V  0.11 TB/s
+  skip flash-attn        N=  1024: ModuleNotFoundError: No module named 'flash_attn'
+  skip flash-attn-3      N=  1024: ModuleNotFoundError: No module named 'flash_attn_interface'
+  fa2-vllm          N=  1024     0.060 ms [IQR 0.058-0.060]   144.4 TFLOP/s  K/V  0.07 TB/s
+  fa3-vllm          N=  1024     0.033 ms [IQR 0.033-0.033]   262.7 TFLOP/s  K/V  0.13 TB/s
+  flashinfer        N=  1024     0.036 ms [IQR 0.036-0.037]   236.4 TFLOP/s  K/V  0.12 TB/s
+  triton-fa2        N=  2048     0.132 ms [IQR 0.132-0.132]   260.2 TFLOP/s  K/V  0.06 TB/s
+  sdpa-flash        N=  2048     0.166 ms [IQR 0.163-0.171]   206.5 TFLOP/s  K/V  0.05 TB/s
+  sdpa-cudnn        N=  2048     0.088 ms [IQR 0.088-0.089]   388.5 TFLOP/s  K/V  0.09 TB/s
+  skip flash-attn        N=  2048: ModuleNotFoundError: No module named 'flash_attn'
+  skip flash-attn-3      N=  2048: ModuleNotFoundError: No module named 'flash_attn_interface'
+  fa2-vllm          N=  2048     0.161 ms [IQR 0.158-0.164]   213.6 TFLOP/s  K/V  0.05 TB/s
+  fa3-vllm          N=  2048     0.075 ms [IQR 0.075-0.075]   457.9 TFLOP/s  K/V  0.11 TB/s
+  flashinfer        N=  2048     0.086 ms [IQR 0.086-0.086]   399.6 TFLOP/s  K/V  0.10 TB/s
+  triton-fa2        N=  4096     0.399 ms [IQR 0.398-0.399]   344.9 TFLOP/s  K/V  0.04 TB/s
+  sdpa-flash        N=  4096     0.506 ms [IQR 0.499-0.509]   271.6 TFLOP/s  K/V  0.03 TB/s
+  sdpa-cudnn        N=  4096     0.261 ms [IQR 0.260-0.263]   527.4 TFLOP/s  K/V  0.06 TB/s
+  skip flash-attn        N=  4096: ModuleNotFoundError: No module named 'flash_attn'
+  skip flash-attn-3      N=  4096: ModuleNotFoundError: No module named 'flash_attn_interface'
+  fa2-vllm          N=  4096     0.460 ms [IQR 0.457-0.467]   299.0 TFLOP/s  K/V  0.04 TB/s
+  fa3-vllm          N=  4096     0.224 ms [IQR 0.223-0.224]   614.7 TFLOP/s  K/V  0.08 TB/s
+  flashinfer        N=  4096     0.249 ms [IQR 0.249-0.249]   551.7 TFLOP/s  K/V  0.07 TB/s
+  triton-fa2        N=  8192     1.362 ms [IQR 1.362-1.363]   403.6 TFLOP/s  K/V  0.02 TB/s
+  sdpa-flash        N=  8192     1.731 ms [IQR 1.712-1.741]   317.7 TFLOP/s  K/V  0.02 TB/s
+  sdpa-cudnn        N=  8192     0.889 ms [IQR 0.885-0.893]   618.2 TFLOP/s  K/V  0.04 TB/s
+  skip flash-attn        N=  8192: ModuleNotFoundError: No module named 'flash_attn'
+  skip flash-attn-3      N=  8192: ModuleNotFoundError: No module named 'flash_attn_interface'
+  fa2-vllm          N=  8192     1.622 ms [IQR 1.607-1.636]   339.0 TFLOP/s  K/V  0.02 TB/s
+  fa3-vllm          N=  8192     0.781 ms [IQR 0.779-0.788]   703.9 TFLOP/s  K/V  0.04 TB/s
+  flashinfer        N=  8192     0.906 ms [IQR 0.858-0.907]   607.0 TFLOP/s  K/V  0.04 TB/s
+  triton-fa2        N= 16384     5.074 ms [IQR 5.072-5.121]   433.4 TFLOP/s  K/V  0.01 TB/s
+  sdpa-flash        N= 16384     6.270 ms [IQR 6.233-6.300]   350.7 TFLOP/s  K/V  0.01 TB/s
+  sdpa-cudnn        N= 16384     3.665 ms [IQR 3.327-3.688]   600.0 TFLOP/s  K/V  0.02 TB/s
+  skip flash-attn        N= 16384: ModuleNotFoundError: No module named 'flash_attn'
+  skip flash-attn-3      N= 16384: ModuleNotFoundError: No module named 'flash_attn_interface'
+  fa2-vllm          N= 16384     5.979 ms [IQR 5.932-6.094]   367.8 TFLOP/s  K/V  0.01 TB/s
+  fa3-vllm          N= 16384     3.376 ms [IQR 3.214-3.378]   651.3 TFLOP/s  K/V  0.02 TB/s
+  flashinfer        N= 16384     3.526 ms [IQR 3.495-3.599]   623.6 TFLOP/s  K/V  0.02 TB/s
+
+B=1 H_q=32 H_kv=8 D=128 bf16 causal=True | median TFLOP/s (IQR ms)
+
+| N | triton-fa2 | sdpa-flash | sdpa-cudnn | fa2-vllm | fa3-vllm | flashinfer |
+|---|---|---|---|---|---|---|
+| 512 | 97.7 (0.000) | 81.4 (0.001) | 111.8 (0.000) | 80.0 (0.000) | 100.1 (0.000) | 125.8 (0.001) |
+| 1024 | 161.8 (0.000) | 138.5 (0.001) | 229.7 (0.001) | 144.4 (0.001) | 262.7 (0.000) | 236.4 (0.000) |
+| 2048 | 260.2 (0.000) | 206.5 (0.008) | 388.5 (0.002) | 213.6 (0.006) | 457.9 (0.001) | 399.6 (0.001) |
+| 4096 | 344.9 (0.000) | 271.6 (0.010) | 527.4 (0.003) | 299.0 (0.010) | 614.7 (0.001) | 551.7 (0.001) |
+| 8192 | 403.6 (0.000) | 317.7 (0.030) | 618.2 (0.008) | 339.0 (0.029) | 703.9 (0.009) | 607.0 (0.049) |
+| 16384 | 433.4 (0.049) | 350.7 (0.067) | 600.0 (0.361) | 367.8 (0.162) | 651.3 (0.164) | 623.6 (0.104) |
+
+wrote bench/results/2026-10-03/bench_bf16.json

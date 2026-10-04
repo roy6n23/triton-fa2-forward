@@ -1,0 +1,18 @@
+=== 23:41:41 env: python -c import json, sys; sys.path.insert(0, 'bench'); import bench; print(json.dumps(bench.environment(), indent=1))
+=== 23:41:48 env exit 0
+=== 23:41:48 pytest: python -m pytest -q -rs
+=== 23:41:51 pytest exit 2
+=== 23:41:51 sass-fp16: python bench/sass_stats.py --from-cache --dump bench/results/2026-10-03/sass_fp16_causal.txt
+=== 23:41:55 sass-fp16 exit 0
+=== 23:41:55 sass-pack: python bench/sass_stats.py --from-cache --pack 4 --dump bench/results/2026-10-03/sass_fp16_causal_pack4.txt
+=== 23:41:59 sass-pack exit 0
+=== 23:41:59 bench-fp16: python bench/bench.py --out bench/results/2026-10-03/bench_fp16.json
+=== 23:43:03 bench-fp16 exit 0
+=== 23:43:03 bench-bf16: python bench/bench.py --dtype bf16 --out bench/results/2026-10-03/bench_bf16.json
+=== 23:44:07 bench-bf16 exit 0
+=== 23:44:07 pack-short: python bench/bench.py --no-causal --batch 16 --kv-len 4096 --seqlens 1 16 32 64 128 256 --providers triton-fa2-nopack triton-fa2-pack triton-fa2 fa2-vllm fa3-vllm sdpa-flash --out bench/results/2026-10-03/pack_short.json
+=== 23:45:32 pack-short exit 0
+=== 23:45:32 pack-prefill: python bench/bench.py --seqlens 512 2048 8192 16384 --providers triton-fa2-nopack triton-fa2-pack --out bench/results/2026-10-03/pack_prefill.json
+=== 23:45:38 pack-prefill exit 0
+=== 23:45:38 ablation: python bench/ablation.py --out bench/results/2026-10-03/ablation_fp16.json
+=== 23:45:50 ablation exit 0

@@ -98,5 +98,86 @@ run overwrote the FP16 JSON. The name now includes the dtype; the FP16 numbers
 survive only in the run log and the README table.
 
 **Open:**
-- [ ] re-run the full N range with the 8 x 4 default
-- [ ] flash-attn / FA3 baselines (needs a prebuilt wheel for this torch)
+- [x] re-run the full N range with the 8 x 4 default (2026-10-03)
+- [x] flash-attn / FA3 baselines (needs a prebuilt wheel for this torch) (2026-10-03, vLLM's build)
+
+## 2026-10-03: second GPU run: FA2/FA3 baselines, GQA head packing, where the time goes
+
+**Box.** RunPod 1x H100 80GB HBM3 SXM (US-NE-1, Secure Cloud, $3.49/h), the same
+vLLM 0.30.0 image, driver 580.126.09. About 30 minutes, about $1.7. Everything ran
+from `bench/gpu_session.sh`; the outputs are in `bench/results/2026-10-03/`.
+
+**Prepared before the rental, without a GPU.**
+- GQA head packing, test first under the interpreter: 29 new tests failed, then
+  passed. Two planted bugs were caught: every row reading the group's first head (27
+  failures), and stage 1 not rounded down to a whole K/V tile (4 failures).
+- `bench/sass_stats.py`. Triton ships ptxas and nvdisasm, so the kernel compiles for
+  sm_90 inside a CPU container on the Mac and its SASS can be read with no GPU. The
+  schedule in the README was known before the box was up; the GPU's own build later
+  had the same 447 instructions in the stage-1 loop.
+- `bench/ablation.py`: the kernel copied with switches that remove one kind of work.
+  With every switch off it is bit-identical to the kernel (interpreter, then GPU).
+- FA2 and FA3 baselines through vLLM's build, which the image already has.
+
+**Problem 1: Nsight Compute cannot read counters in a RunPod container.** `ncu`
+2026.3.1 (NVIDIA devtools apt repo) stops at `ERR_NVGPUCTRPERM`. The host driver has
+`RmProfilingAdminOnly: 1` (`/proc/driver/nvidia/params`) and the container has
+neither `CAP_SYS_ADMIN` nor `CAP_PERFMON` (`capsh --print`), so nothing inside the
+pod can change it. Proton's CUPTI PC sampling, the other route to stall reasons,
+aborted with `cuptiPCSamplingGetStallReasons` error 1 (`pcsampling.log`). Proton's
+in-kernel instrumentation is off by default for Triton-language kernels, because
+pipelining moves the timestamps (its own docstring says so), so I did not use it.
+The breakdown in the README comes from the clock, the SASS and the knockout timings
+instead. `bench/profile_ncu.sh` is ready for a machine that allows counter access (a
+VM or bare metal with root), and `gpu_session.sh` now skips it with a message when
+the counters are closed.
+
+**Problem 2: the GPU test run failed at collection.** `tests/test_ablation.py`
+imported `tests.test_correctness`, and the vLLM image has a `tests` package in
+`dist-packages`, which won the import. The CPU container had no such package, so it
+passed there. The test now imports `test_correctness` directly (pytest puts `tests/`
+on the path). 115 passed after the fix.
+
+**Problem 3: a few percent of noise at N=16384.** In the first knockout run the
+copy with nothing removed was 2.4% faster than the kernel it is identical to, and the
+two candidate optimizations below looked like slowdowns on their own but a speedup
+together. With 2-4% between identical code, variants that close cannot be ranked
+from sequential runs. `ablation.py --rounds 5` interleaves the variants and pools
+the samples. With it N=4096 has IQRs of 0.25% and every conclusion in the README
+holds at all three lengths, though at N=16384 identical code still differed by 3.8%.
+
+**Problem 4: one BF16 cell was an outlier.** The first BF16 table had 100.6
+TFLOP/s at N=1024 (FP16: 161.5) with a large IQR. A rerun gave 163.9, so the whole
+BF16 table was rerun (`bench_bf16.json`; the first run is kept as
+`bench_bf16_first.json`).
+
+**The clock.** In a 15 s loop of the kernel at N=16384 the GPU drew 677 W on
+average, `nvidia-smi` reported "SW power cap" in 74 of 75 samples, and the SM clock
+averaged 1685 MHz (p10 1635, p90 1755; `clock_n16384.csv`). The realistic ceiling is
+about 911 TFLOP/s, not 989.4.
+
+**Results** (details in the README):
+- 8 x 4 config: +10% to +13% over the 8 x 2 run at every N. 12-21% ahead of FA2;
+  FA3, cuDNN and FlashInfer are 1.3x to 1.7x ahead from N=2048 up.
+- Time at N=16384: tensor-core work at peak 45%, matmuls below peak 16%, HBM traffic
+  7%, softmax 33%, of which the exponentials are 11%.
+- Packing at batch 16, N_kv = 4096: 2.95x up to N_q = 32, as fast as FA3; 1.87x at
+  N_q = 64; nothing from N_q = 128, where the rule turns it off. Long prefill: within
+  -2.5% to +0.2%.
+- Two fixes measured in the knockout copy: skip the end-of-sequence mask when N_kv
+  is a multiple of BLOCK_N, and fold the scale into the exponent as one FFMA. 447 ->
+  371 instructions per tile, 8.6% to 10.0% faster. Not in the kernel yet.
+
+**Lesson.** The famous number is the exponentials: 989 vs 3.9 TFLOP/s on H100. In
+this kernel they cost 11% of the time. The FP32 work around them, issued while the
+tensor cores wait, costs twice that, and the matmul schedule itself loses another
+16%. Counting instructions per tile told me that before any timing did.
+
+**Open:**
+- [ ] Put `even_n` and `ffma_scale` into the kernel, then rerun the table.
+- [ ] Nsight Compute on a machine with counter access: tensor-pipe utilization and
+  stall reasons per instruction, to check the breakdown.
+- [ ] Overlap softmax and matmul: Triton's warp specialization, or a two-warpgroup
+  ping-pong.
+- [ ] Why FA3 is 1.27x faster at N_q = 64 in the packing table (split-KV? tile shape?).
+

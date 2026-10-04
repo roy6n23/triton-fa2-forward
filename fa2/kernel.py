@@ -32,6 +32,14 @@ Causal handling (FA2 block skipping), for a Q tile covering rows [lo_m, lo_m + B
 
 We work in base 2: exp(x) == exp2(x * log2(e)), so log2(e) is folded into the
 softmax scale once and every exponential becomes a single exp2 instruction.
+
+GQA head packing (pack_gqa): the G query heads that share a KV head can share one
+program. Its BLOCK_M rows are then (position, head) pairs, row r -> position r // G,
+head r % G, so a tile covers BLOCK_M / G positions of all G heads and each K/V tile
+it loads serves all of them. This matters when N_q is small: one head's N_q rows
+fill N_q / BLOCK_M of a tile, a group's G * N_q rows fill G times more. For long
+prefill it changes nothing on paper: a program sees G times fewer positions, so
+the K/V reuse it gains across heads is the reuse it loses across positions.
 """
 
 import math
@@ -69,8 +77,8 @@ def _attn_fwd_inner(
         qk = tl.where(visible, qk, float("-inf"))
 
         # Online-softmax update. m_new is always finite here: the first tile a row
-        # sees always contains at least one visible column (column 0 in stage 1,
-        # or column lo_m <= row in stage 2), so -inf - -inf never happens.
+        # sees always contains column 0, which every row can see (stage 1 starts
+        # at 0, and stage 2 does whenever stage 1 is empty), so -inf - -inf never happens.
         m_new = tl.maximum(m_i, tl.max(qk, 1))
         p = tl.math.exp2(qk - m_new[:, None])
         alpha = tl.math.exp2(m_i - m_new)
@@ -95,48 +103,54 @@ def _attn_fwd(
     stride_ob, stride_oh, stride_on, stride_od,
     H_Q, N_Q, N_KV, qk_scale,
     GQA_GROUP: tl.constexpr,
+    PACK: tl.constexpr,
     HEAD_DIM: tl.constexpr,
     BLOCK_M: tl.constexpr, BLOCK_N: tl.constexpr,
     CAUSAL: tl.constexpr,
 ):
     # --- which tile am I? --------------------------------------------------
-    start_m = tl.program_id(0)          # Q tile index along the sequence
-    off_bh = tl.program_id(1)           # flattened (batch, q_head)
-    off_b = off_bh // H_Q
-    off_hq = off_bh % H_Q
-    off_hkv = off_hq // GQA_GROUP       # GQA: query heads share a KV head
+    # PACK query heads share this program (1 = no packing, GQA_GROUP = a whole group).
+    start_m = tl.program_id(0)          # tile index along the PACK * N_Q rows
+    off_bh = tl.program_id(1)           # flattened (batch, first q_head // PACK)
+    off_b = off_bh // (H_Q // PACK)
+    off_hq0 = (off_bh % (H_Q // PACK)) * PACK
+    off_hkv = off_hq0 // GQA_GROUP      # GQA: query heads share a KV head
 
-    q_base = Q + off_b * stride_qb + off_hq * stride_qh
     k_base = K + off_b * stride_kb + off_hkv * stride_kh
     v_base = V + off_b * stride_vb + off_hkv * stride_vh
-    o_base = Out + off_b * stride_ob + off_hq * stride_oh
 
-    offs_m = start_m * BLOCK_M + tl.arange(0, BLOCK_M)
+    offs_r = start_m * BLOCK_M + tl.arange(0, BLOCK_M)
+    offs_m = offs_r // PACK             # sequence position of each row
+    offs_hq = off_hq0 + offs_r % PACK   # query head of each row
     offs_d = tl.arange(0, HEAD_DIM)
     row_ok = offs_m < N_Q
+    q_rows = Q + off_b * stride_qb + offs_hq * stride_qh + offs_m * stride_qn
+    o_rows = Out + off_b * stride_ob + offs_hq * stride_oh + offs_m * stride_on
 
     # --- load Q_i once; it is reused against every K/V tile ------------------
-    q = tl.load(
-        q_base + offs_m[:, None] * stride_qn + offs_d[None, :] * stride_qd,
-        mask=row_ok[:, None], other=0.0,
-    )
+    q = tl.load(q_rows[:, None] + offs_d[None, :] * stride_qd, mask=row_ok[:, None], other=0.0)
 
     m_i = tl.full([BLOCK_M], float("-inf"), dtype=tl.float32)
     l_i = tl.zeros([BLOCK_M], dtype=tl.float32)
     acc = tl.zeros([BLOCK_M, HEAD_DIM], dtype=tl.float32)
 
     if CAUSAL:
-        # stage 1: tiles strictly left of the diagonal block, no elementwise mask.
+        # The tile's rows cover positions [lo_m, hi_m). Stage 1 ends at lo_m rounded down to a
+        # whole K/V tile, so with PACK > 1 (BLOCK_M / PACK positions) stage 2 may start left of lo_m.
+        lo_m = start_m * (BLOCK_M // PACK)
+        hi_m = lo_m + BLOCK_M // PACK
+        stage1_end = (lo_m // BLOCK_N) * BLOCK_N
+        # stage 1: tiles strictly left of the diagonal band, no elementwise mask.
         acc, l_i, m_i = _attn_fwd_inner(
             acc, l_i, m_i, q, k_base, v_base, stride_kn, stride_kd, stride_vn, stride_vd,
-            offs_m, offs_d, 0, start_m * BLOCK_M, N_KV, qk_scale,
+            offs_m, offs_d, 0, stage1_end, N_KV, qk_scale,
             BLOCK_N, False,
         )
-        # stage 2: the diagonal block, elementwise causal mask.
+        # stage 2: the diagonal band, elementwise causal mask.
         # Everything to the right is skipped entirely (never loaded, never multiplied).
         acc, l_i, m_i = _attn_fwd_inner(
             acc, l_i, m_i, q, k_base, v_base, stride_kn, stride_kd, stride_vn, stride_vd,
-            offs_m, offs_d, start_m * BLOCK_M, tl.minimum((start_m + 1) * BLOCK_M, N_KV),
+            offs_m, offs_d, stage1_end, tl.minimum(hi_m, N_KV),
             N_KV, qk_scale,
             BLOCK_N, True,
         )
@@ -150,7 +164,7 @@ def _attn_fwd(
     # --- normalise once, write the output once --------------------------------
     acc = acc / l_i[:, None]
     tl.store(
-        o_base + offs_m[:, None] * stride_on + offs_d[None, :] * stride_od,
+        o_rows[:, None] + offs_d[None, :] * stride_od,
         acc.to(Out.dtype.element_ty),
         mask=row_ok[:, None],
     )
@@ -168,11 +182,25 @@ def _default_config(head_dim, on_cuda):
     return 128, 64, 8, 4
 
 
+def _tile_efficiency(rows, block_m):
+    return rows / (-(-rows // block_m) * block_m)
+
+
+def should_pack_gqa(n_q, group, block_m):
+    """FlashAttention-3's rule (hopper/heuristics.h, should_pack_gqa): pack when the unpacked tiles are
+    less than 90% as full as the packed ones. Packing needs block_m to be a multiple of the group."""
+    if group == 1 or block_m % group:
+        return False
+    return _tile_efficiency(n_q, block_m) < 0.9 * _tile_efficiency(n_q * group, block_m)
+
+
 def attention(q, k, v, causal=True, sm_scale=None, block_m=None, block_n=None,
-              num_warps=None, num_stages=None):
+              num_warps=None, num_stages=None, pack_gqa=None):
     """softmax(Q K^T * sm_scale [+ causal mask]) V, fused.
 
     q: [B, H_q, N_q, D]; k, v: [B, H_kv, N_kv, D]; returns [B, H_q, N_q, D].
+    pack_gqa: put each GQA group's query heads into one program (see the module docstring);
+    None decides with should_pack_gqa.
     """
     assert q.dim() == k.dim() == v.dim() == 4
     B, H_q, N_q, D = q.shape
@@ -189,20 +217,25 @@ def attention(q, k, v, causal=True, sm_scale=None, block_m=None, block_n=None,
     bm, bn, nw, ns = _default_config(D, q.is_cuda)
     bm, bn = block_m or bm, block_n or bn
     nw, ns = num_warps or nw, num_stages or ns
-    # Stage 2 covers exactly one BLOCK_M-wide diagonal band in BLOCK_N steps.
-    assert bm % bn == 0, "BLOCK_M must be a multiple of BLOCK_N"
+    group = H_q // H_kv
+    if pack_gqa is None:
+        pack_gqa = should_pack_gqa(N_q, group, bm)
+    elif pack_gqa and bm % group:
+        raise ValueError(f"pack_gqa needs BLOCK_M ({bm}) to be a multiple of the GQA group ({group})")
+    pack = group if pack_gqa else 1
 
     if sm_scale is None:
         sm_scale = 1.0 / math.sqrt(D)
     qk_scale = sm_scale * 1.4426950408889634  # log2(e): exp(x) == exp2(x * log2 e)
 
     out = torch.empty_like(q)
-    grid = (triton.cdiv(N_q, bm), B * H_q)
+    grid = (triton.cdiv(N_q * pack, bm), B * H_q // pack)
     _attn_fwd[grid](
         q, k, v, out,
         *q.stride(), *k.stride(), *v.stride(), *out.stride(),
         H_q, N_q, N_kv, qk_scale,
-        GQA_GROUP=H_q // H_kv,
+        GQA_GROUP=group,
+        PACK=pack,
         HEAD_DIM=D,
         BLOCK_M=bm, BLOCK_N=bn,
         CAUSAL=causal,

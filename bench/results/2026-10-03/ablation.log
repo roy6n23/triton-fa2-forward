@@ -1,0 +1,28 @@
+
+N=4096  (production 0.403 ms, 341.5 TFLOP/s)
+| variant | ms | vs production | TFLOP/s | output |
+|---|---|---|---|---|
+| production | 0.403 | +0.000 (+0.0%) | 341.5 |  |
+| copy | 0.399 | -0.003 (-0.8%) | 344.3 | bit-exact |
+| no_exp | 0.371 | -0.032 (-7.9%) | 370.7 | max diff nan |
+| no_softmax | 0.259 | -0.143 (-35.6%) | 530.0 | max diff 4.89e+02 |
+| kv_l2 | 0.376 | -0.026 (-6.5%) | 365.4 | max diff 2.29e+00 |
+| matmul_only | 0.245 | -0.157 (-39.1%) | 560.8 | max diff 3.86e+03 |
+| ffma_scale | 0.396 | -0.006 (-1.6%) | 347.0 | max diff 4.88e-04 |
+| even_n | 0.367 | -0.035 (-8.7%) | 374.1 | max diff 4.88e-04 |
+| ffma_scale+even_n | 0.360 | -0.042 (-10.5%) | 381.6 | max diff 4.88e-04 |
+
+N=16384  (production 5.199 ms, 423.0 TFLOP/s)
+| variant | ms | vs production | TFLOP/s | output |
+|---|---|---|---|---|
+| production | 5.199 | +0.000 (+0.0%) | 423.0 |  |
+| copy | 5.072 | -0.127 (-2.4%) | 433.5 | bit-exact |
+| no_exp | 4.593 | -0.606 (-11.7%) | 478.8 | max diff nan |
+| no_softmax | 3.768 | -1.431 (-27.5%) | 583.6 | max diff 1.02e+03 |
+| kv_l2 | 4.797 | -0.403 (-7.7%) | 458.5 | max diff 2.21e+00 |
+| matmul_only | 3.153 | -2.046 (-39.3%) | 697.4 | max diff 1.81e+04 |
+| ffma_scale | 5.284 | +0.085 (+1.6%) | 416.2 | max diff 2.44e-04 |
+| even_n | 5.395 | +0.196 (+3.8%) | 407.6 | max diff 2.44e-04 |
+| ffma_scale+even_n | 4.869 | -0.330 (-6.3%) | 451.6 | max diff 2.44e-04 |
+
+wrote bench/results/2026-10-03/ablation_fp16.json

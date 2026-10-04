@@ -87,11 +87,11 @@ else:
     BATCH = 1
 
 
-def check_against_torch(q, k, v, causal):
+def check_against_torch(q, k, v, causal, _impl=None, **kw):
     from fa2.kernel import attention
 
     ref = naive_attention(q.double(), k.double(), v.double(), causal=causal)
-    ours = attention(q, k, v, causal=causal)
+    ours = (_impl or attention)(q, k, v, causal=causal, **kw)
     theirs = F.scaled_dot_product_attention(q, k, v, is_causal=causal, enable_gqa=True)
 
     ours_abs, ours_rel = errors(ours, ref)
@@ -138,3 +138,61 @@ def test_kernel_noncontiguous_input():
                for t in make_qkv(BATCH, 4, 2, 64, 64, 64, torch.float16))
     assert not q.is_contiguous()
     check_against_torch(q, k, v, causal=True)
+
+
+# ---------------------------------------------------------------------------
+# 3. GQA head packing: a group's query heads share one program's M dimension.
+# ---------------------------------------------------------------------------
+
+if ON_GPU:
+    PACK_HEADS = [(32, 8), (32, 1)]         # group 4 (Llama-3-8B), MQA (group 32)
+    PACK_LENS = [1, 64, 1000, 2048]
+else:
+    PACK_HEADS = [(4, 2), (4, 1), (8, 2)]
+    PACK_LENS = [1, 5, 37, 128]
+
+
+@needs_kernel
+@pytest.mark.parametrize("causal", [True, False])
+@pytest.mark.parametrize("H_q,H_kv", PACK_HEADS)
+@pytest.mark.parametrize("N", PACK_LENS)
+def test_kernel_pack_gqa(causal, H_q, H_kv, N):
+    """Packed and unpacked runs compute every row with the same tiles in the same order, so they agree bit for
+    bit; the packed output also meets the 2x bar on its own."""
+    from fa2.kernel import attention
+
+    q, k, v = make_qkv(BATCH, H_q, H_kv, N, N, 64, torch.float16)
+    packed = attention(q, k, v, causal=causal, pack_gqa=True)
+    unpacked = attention(q, k, v, causal=causal, pack_gqa=False)
+    assert torch.equal(packed, unpacked)
+    check_against_torch(q, k, v, causal, pack_gqa=True)
+
+
+@needs_kernel
+@pytest.mark.parametrize("N_q", [1, 3, 16])
+def test_kernel_pack_gqa_short_queries_long_kv(N_q):
+    """The case packing is for: a few new tokens per head against a long K/V (decode, chunked prefill)."""
+    q, k, v = make_qkv(BATCH, 8, 2, N_q, 200, 64, torch.float16)
+    check_against_torch(q, k, v, causal=False, pack_gqa=True)
+
+
+@needs_kernel
+def test_pack_gqa_needs_block_m_divisible_by_group():
+    from fa2.kernel import attention
+
+    q, k, v = make_qkv(BATCH, 6, 2, 16, 16, 64, torch.float16)    # group 3 does not divide BLOCK_M
+    with pytest.raises(ValueError, match="BLOCK_M"):
+        attention(q, k, v, causal=True, pack_gqa=True)
+    check_against_torch(q, k, v, causal=True)                       # the default does not pack it
+
+
+@needs_kernel
+def test_should_pack_gqa_follows_tile_efficiency():
+    from fa2.kernel import should_pack_gqa
+
+    assert should_pack_gqa(1, 4, 128)                  # 1 of 128 rows used vs 4 of 128
+    assert should_pack_gqa(64, 4, 128)                 # half a tile vs exactly two tiles
+    assert not should_pack_gqa(4096, 4, 128)           # both use every row
+    assert not should_pack_gqa(1000, 4, 128)           # 1000/1024 vs 4000/4096: no gain
+    assert not should_pack_gqa(64, 1, 128)             # MHA: nothing to pack
+    assert not should_pack_gqa(64, 3, 128)             # group 3 does not divide 128
