@@ -206,3 +206,13 @@ def test_sm_scale_must_be_positive():
     q, k, v = make_qkv(BATCH, 4, 2, 16, 16, 64, torch.float16)
     with pytest.raises(ValueError, match="sm_scale"):
         attention(q, k, v, sm_scale=-0.125)
+
+
+@needs_kernel
+@pytest.mark.parametrize("block_m,block_n", [(32, 32), (32, 16), (64, 32), (16, 16)])
+@pytest.mark.parametrize("causal", [True, False])
+def test_kernel_other_tile_sizes(block_m, block_n, causal):
+    """Tile sizes other than the default (bench/sweep.py times these): BLOCK_N equal to BLOCK_M, half of it,
+    and N not a multiple of either."""
+    q, k, v = make_qkv(BATCH, 4, 2, 100, 100, 64, torch.float16)
+    check_against_torch(q, k, v, causal, block_m=block_m, block_n=block_n)
