@@ -30,21 +30,29 @@ if ! sudo docker run --rm --gpus all ubuntu:24.04 nvidia-smi -L > /dev/null 2>&1
     sudo nvidia-ctk runtime configure --runtime=docker && sudo systemctl restart docker
 fi
 
-# 3. Inside the image: Nsight Compute from NVIDIA's devtools repo, pytest in a venv, then the session.
+# 3. Inside the image: Nsight Compute (the host's own if it has one, since that version is known to work with
+#    this driver; otherwise the newest from NVIDIA's devtools repo), pytest in a venv, then the session.
+HOST_NCU=$(ls -d /opt/nvidia/nsight-compute/20* 2>/dev/null | sort -V | tail -1 || true)
+MOUNT=()
+if [ -n "$HOST_NCU" ]; then MOUNT=(-v "$HOST_NCU":/opt/host-ncu:ro); echo "using the host's Nsight Compute: $HOST_NCU"; fi
 sudo docker pull -q "$IMAGE"
-sudo docker run --rm --gpus all --cap-add SYS_ADMIN --ipc=host \
+sudo docker run --rm --gpus all --cap-add SYS_ADMIN --ipc=host "${MOUNT[@]}" \
     -v "$PWD":/root/triton-fa2-forward -w /root/triton-fa2-forward --entrypoint bash "$IMAGE" -c '
 set -e
-apt-get update -qq > /dev/null
-DEBIAN_FRONTEND=noninteractive apt-get install -y -qq --no-install-recommends gnupg2 wget > /dev/null
-. /etc/lsb-release
-REPO=https://developer.download.nvidia.com/devtools/repos/ubuntu${DISTRIB_RELEASE//./}/amd64
-wget -qO- $REPO/nvidia.pub | gpg --dearmor > /usr/share/keyrings/nvidia-devtools.gpg
-echo "deb [signed-by=/usr/share/keyrings/nvidia-devtools.gpg] $REPO/ /" > /etc/apt/sources.list.d/nvidia-devtools.list
-apt-get update -qq > /dev/null
-PKG=$(apt-cache search "^nsight-compute-20" | awk "{print \$1}" | sort -V | tail -1)
-DEBIAN_FRONTEND=noninteractive apt-get install -y -qq "$PKG" > /dev/null
-ln -sf "$(ls -d /opt/nvidia/nsight-compute/*/ncu | sort -V | tail -1)" /usr/local/bin/ncu
+if [ -x /opt/host-ncu/ncu ]; then
+    ln -sf /opt/host-ncu/ncu /usr/local/bin/ncu
+else
+    apt-get update -qq > /dev/null
+    DEBIAN_FRONTEND=noninteractive apt-get install -y -qq --no-install-recommends gnupg2 wget > /dev/null
+    . /etc/lsb-release
+    REPO=https://developer.download.nvidia.com/devtools/repos/ubuntu${DISTRIB_RELEASE//./}/amd64
+    wget -qO- $REPO/nvidia.pub | gpg --dearmor > /usr/share/keyrings/nvidia-devtools.gpg
+    echo "deb [signed-by=/usr/share/keyrings/nvidia-devtools.gpg] $REPO/ /" > /etc/apt/sources.list.d/nvidia-devtools.list
+    apt-get update -qq > /dev/null
+    PKG=$(apt-cache search "^nsight-compute-20" | awk "{print \$1}" | sort -V | tail -1)
+    DEBIAN_FRONTEND=noninteractive apt-get install -y -qq "$PKG" > /dev/null
+    ln -sf "$(ls -d /opt/nvidia/nsight-compute/*/ncu | sort -V | tail -1)" /usr/local/bin/ncu
+fi
 python3 -m venv --system-site-packages /root/venv && /root/venv/bin/pip install -q pytest
 . /root/venv/bin/activate
 ncu --version | tail -1
