@@ -175,9 +175,9 @@ tensor cores wait, costs twice that, and the matmul schedule itself loses anothe
 
 **Open:**
 - [x] Put `even_n` and `ffma_scale` into the kernel (2026-10-03, entry below).
-- [ ] Rerun the table with them.
-- [ ] Nsight Compute on a machine with counter access: tensor-pipe utilization and
-  stall reasons per instruction, to check the breakdown.
+- [x] Rerun the table with them. (2026-10-04)
+- [x] Nsight Compute on a machine with counter access: tensor-pipe utilization and
+  stall reasons per instruction, to check the breakdown. (2026-10-04)
 - [ ] Overlap softmax and matmul: Triton's warp specialization, or a two-warpgroup
   ping-pong.
 - [ ] Why FA3 is 1.27x faster at N_q = 64 in the packing table (split-KV? tile shape?).
@@ -200,4 +200,73 @@ not a measurement. The results table is still the e4b8e5e one and says so.
 
 `attention()` now rejects sm_scale <= 0: the row max is taken before scaling, which
 is only the max of the scaled scores when the scale is positive.
+
+## 2026-10-04: third GPU run, on a VM where Nsight Compute works
+
+**Box.** Verda (formerly DataCrunch), 1x H100 80GB HBM3 SXM VM in FIN-02, driver
+580.178.04, Ubuntu 24.04 with Docker; the same vLLM 0.30.0 image ran inside it. On-demand
+H100 was sold out in all three of Verda's locations, so it was a spot instance at
+$1.85/h. About 30 minutes, $0.94 including the disk. Everything ran from
+`bench/vm_session.sh`; outputs in `bench/results/2026-10-04/`.
+
+**Why Verda.** It was the only provider found that documents counter access in its
+VMs (a December 2025 post on B200/B300; Lambda's staff had said Nsight Compute is not
+supported on its VMs). On this H100 VM `/proc/driver/nvidia/params` showed
+`RmProfilingAdminOnly: 0`, and `ncu` read counters on a five-line CUDA kernel in the
+first minutes. The host's Nsight Compute 2025.3.1 was mounted into the container, not
+the newest from apt: a newer release had given NaN counters on another provider's B200.
+
+**Results.**
+- 119 tests passed. The GPU build has 371 instructions in the stage-1 loop, as the
+  ahead-of-time build predicted.
+- The table: 455.3 TFLOP/s at N=16384 FP16 (462.3 BF16), 22% to 37% ahead of FA2,
+  FA3/cuDNN/FlashInfer 1.3x to 1.5x ahead from N=2048.
+- The two fixes, interleaved against `before_fixes`: 10.0%, 9.2% and 6.6% less time at
+  N = 4096, 8192 and 16384. The copy measured 10.0%, 8.6% and 9.5% on the RunPod box.
+- Nsight Compute at N=16384: tensor pipe active 51.5% (FA3: 81.2%; the kernel before
+  the fixes: 45.4%; the matmuls-only copy: 83.6%), DRAM at 1.8% of its peak with a 98%
+  L2 hit rate. The one instruction with the most stall samples is the
+  `WARPGROUP.DEPBAR.LE gsb0, 0x0` after Q K^T (18%); the softmax's instructions hold
+  41% of the samples.
+
+**Two readings from 2026-10-03 were wrong.**
+- The knockout that rereads the first K/V tile was called "HBM traffic". DRAM is idle;
+  K and V came from L2 all along, and what the knockout saves is the wait on L2.
+- "Even with no softmax the matmuls reach only 74% of the peak" assumed the full
+  kernel's clock (1.68 GHz) for the matmuls-only copy. At ncu's locked clock that copy
+  keeps the tensor pipe 84% busy. Under the power cap it probably clocks lower than the
+  full kernel; I did not measure its clock.
+
+The ranking in the README held. The reasoning from SASS and knockouts got the
+structure right and two numbers wrong. Both errors came from assuming a quantity
+instead of measuring it: where K/V comes from, and the clock.
+
+**Problem: N=1024 at half speed.** In the first run, triton-fa2 and sdpa-flash at
+N=1024 came out at 64.5 and 66.6 TFLOP/s with large IQRs, in both dtypes, right after
+FlashInfer's first call at N=512 (itself 19.4). A rerun with FlashInfer reproduced it
+(69.0 and 72.5); a rerun without FlashInfer gave 182.1 and 143.3. The BF16 outlier on
+2026-10-03 was probably the same thing. Kernels this short (about 0.03 ms) are timed one
+launch per event pair, so host delay inside the window counts as kernel time. The
+README uses the rerun for those cells and says so. The right fix is to time a burst of
+launches, or a CUDA graph, for short kernels.
+
+**Problem: my own wait loop.** The loop that waited for SSH ended with `&& break` after
+a command whose last step failed (`command -v ncu`, not on PATH), so it kept polling
+after the VM was up: about 4 minutes, $0.12.
+
+**Problem: the disk outlived the VM.** `verda vm delete --with-volumes` left the OS
+volume detached and billing ($0.03/h). It was deleted by hand; `verda status` then
+showed nothing billing.
+
+**Clock on this box:** 1.61 GHz mean (p10 1.56, p90 1.68) at 677 W, "SW power cap" in
+74 of 75 samples. RunPod's box averaged 1.68 GHz. The ceiling here is about 870
+TFLOP/s; the kernel's 455 is 52% of it, close to its 51.5% tensor-pipe activity.
+
+**Open:**
+- [ ] Overlap softmax and matmul (warp specialization or a two-warpgroup ping-pong):
+  the tensor pipe is idle half the time, and that is all of the gap to FA3.
+- [ ] Time short kernels with a burst of launches or a CUDA graph.
+- [ ] Packing gained 0-5% on long causal prefill in five of six interleaved runs, where
+  FA3's rule leaves it off. Why, and whether to pack whenever the group divides BLOCK_M.
+- [ ] Why FA3 is 1.11x faster at N_q = 64 in the packing table.
 

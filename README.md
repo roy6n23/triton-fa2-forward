@@ -8,13 +8,11 @@ It comes with a pure-PyTorch mirror of the same algorithm, a correctness suite
 graded against PyTorch's own error, a benchmark against FlashAttention-2 and -3,
 cuDNN, FlashInfer and PyTorch SDPA, and a breakdown of where the kernel's time goes.
 
-> **Status (2026-10-03):** second H100 SXM run (RunPod), 115 tests pass on the GPU.
-> The default D=128 config is now 8 warps × 4 stages, GQA head packing is in, the
-> FA2/FA3 baselines are measured, and the time per K/V tile is broken down below.
-> Two fixes that breakdown found are now in the kernel; they were timed in a copy of
-> it, and the table has not been rerun with them yet. Nsight Compute could not run in
-> the rented container (no access to the GPU's performance counters); its script is
-> ready ([WORKLOG](WORKLOG.md), 2026-10-03).
+> **Status (2026-10-04):** third H100 SXM run, on a Verda VM where Nsight Compute can
+> read the GPU's performance counters. 119 tests pass on the GPU. The kernel now has
+> GQA head packing and the two fixes its profile pointed to (7% to 10% less time), it is
+> 22% to 37% faster than FlashAttention-2, and the gap to FlashAttention-3 is measured
+> down to the instruction below ([WORKLOG](WORKLOG.md), 2026-10-03 and 2026-10-04).
 
 ## Layout
 
@@ -29,6 +27,7 @@ bench/sass_stats.py  instructions per K/V tile and their schedule, from the SASS
 bench/profile_ncu.sh Nsight Compute on the kernel, two knockouts and FA3 (needs counter access)
 bench/gpu_session.sh every GPU measurement in one logged run; bench/results/<date>/ is its output
 bench/vm_session.sh  the same run on a VM with sudo, in the vLLM image with CAP_SYS_ADMIN, so ncu can run
+bench/ncu_summary.py the Nsight Compute reports side by side, and where the warps stall (CSV only, no GPU)
 WORKLOG.md           what broke and how it was found
 .github/workflows/   CI: the test suite under TRITON_INTERPRET=1 on a CPU runner
 ```
@@ -116,8 +115,8 @@ are optimistic and are not GPU measurements:
 | no | 4/1 | 128 | 2.75e-4 | 2.50e-4 | 1.10 |
 
 The GPU runs then applied the same 2× bar on real tensor cores. On the H100,
-`pytest` reported 77 passed on 2026-10-02 and 115 passed on 2026-10-03 (the GQA
-packing tests added), BF16 included, which the interpreter has to skip. In the
+`pytest` reported 77 passed on 2026-10-02, 115 on 2026-10-03 (the GQA packing tests
+added) and 119 on 2026-10-04, BF16 included, which the interpreter has to skip. In the
 2026-10-02 num_warps x num_stages sweep (D=128, FP16, causal, N=4096 and 16384),
 the max abs error vs SDPA was 4.88e-4 in every config ([WORKLOG](WORKLOG.md)).
 That number is a direct difference from SDPA's output, not the fp64-referenced
@@ -137,6 +136,11 @@ error in the table above.
   --rounds 5` times every variant once per round and pools the samples, so a slow
   drift in clock or temperature hits all of them alike. At N=16384 two runs of
   identical code differed by 2-4% when measured one after the other.
+- **Kernels under about 0.05 ms** (N ≤ 1024 at this shape) are timed one launch per
+  event pair, so host-side launch delay inside the window shows up as kernel time.
+  In every run with FlashInfer, its first call (at N=512) left the next two providers
+  at N=1024 at half speed with large IQRs; the README uses a rerun without FlashInfer
+  for those cells, and FlashInfer's own N=512 number measures its launch overhead.
 
 The baselines are FlashAttention-2 and FlashAttention-3, cuDNN (via SDPA), FlashInfer
 and SDPA's flash backend. A comparison against torch SDPA alone would be a 2023
@@ -148,122 +152,124 @@ when they are not installed.
 
 ## Results
 
-**2026-10-03, H100 80GB HBM3 SXM** (RunPod), driver 580.126.09, CUDA 13.0, torch
-2.13.0+cu130, Triton 3.7.1, FlashInfer 0.6.18.post1, vLLM 0.30.0. Default shape:
-Llama-3-8B attention (H_q=32, H_kv=8, D=128), batch 1, causal, FP16, 8 warps x 4
-stages. Median TFLOP/s; the IQRs and the full environment are in
-`bench/results/2026-10-03/bench_fp16.json`:
+**2026-10-04, H100 80GB HBM3 SXM** (Verda VM, FIN-02), driver 580.178.04, the same
+image as before: CUDA 13.0, torch 2.13.0+cu130, Triton 3.7.1, FlashInfer 0.6.18.post1,
+vLLM 0.30.0. Default shape: Llama-3-8B attention (H_q=32, H_kv=8, D=128), batch 1,
+causal, FP16, 8 warps x 4 stages, kernel at commit 83dbbe8. Median TFLOP/s; the IQRs
+and the full environment are in `bench/results/2026-10-04/bench_fp16.json`:
 
 | N | triton-fa2 | FA2 | FA3 | sdpa-flash | sdpa-cudnn | flashinfer |
 |---|---|---|---|---|---|---|
-| 512 | 96.8 | 79.8 | 99.1 | 80.7 | 112.3 | 126.2 |
-| 1024 | 161.5 | 143.9 | 252.4 | 137.8 | 229.8 | 236.0 |
-| 2048 | 260.0 | 221.7 | 430.6 | 205.4 | 382.8 | 396.2 |
-| 4096 | 342.4 | 289.7 | 579.8 | 272.4 | 516.0 | 539.1 |
-| 8192 | 398.8 | 331.3 | 668.0 | 319.6 | 600.6 | 589.6 |
-| 16384 | 427.6 | 356.7 | 640.4 | 346.1 | 609.3 | 549.3 |
+| 512 | 112.3 | 86.1 | 107.2 | 86.1 | 126.4 | (19.4) |
+| 1024 | 182.1 | 149.4 | 268.2 | 143.3 | 245.8 | 248.3 |
+| 2048 | 292.3 | 226.4 | 443.9 | 210.2 | 395.4 | 407.2 |
+| 4096 | 389.5 | 296.2 | 589.5 | 274.7 | 527.3 | 543.0 |
+| 8192 | 442.0 | 323.7 | 661.1 | 312.5 | 599.4 | 568.3 |
+| 16384 | 455.3 | 348.9 | 645.1 | 335.6 | 594.0 | 586.0 |
 
-- **vs FA2:** 12% to 21% faster at every N. FA2's schedule was designed for Ampere.
-- **vs FA3, cuDNN, FlashInfer:** the Hopper-specific kernels are 1.3x to 1.7x faster
-  from N=2048 up. The next section says where that gap comes from.
-- **BF16** is within 1.5% of FP16 at every N (433.4 TFLOP/s at N=16384,
-  `bench_bf16.json`).
-- **vs the 2026-10-02 run** (8 warps x 2 stages, same box type and stack): +10% to
-  +13% at every N, from the 8 x 4 config the sweep picked
-  (`bench/results/NVIDIA-H100-80GB-HBM3_bf16_2026-10-02.json` for that run's BF16).
-- **Not yet in this table:** the two fixes from [Where the time goes](#where-the-time-goes).
-  The table was measured at commit e4b8e5e, before they went in. A copy of the kernel
-  with them ran 8.6% to 10.0% faster, and the kernel now compiles to exactly that copy's
-  SASS, so expect about 9% more; the next GPU run reruns the table.
+- **vs FA2:** 22% to 37% faster at every N. FA2's schedule was designed for Ampere.
+- **vs FA3, cuDNN, FlashInfer:** the Hopper-specific kernels are 1.3x to 1.5x faster
+  from N=2048 up. The next section measures where that gap comes from.
+- **BF16** is within 1.5% of FP16 at every N (462.3 TFLOP/s at N=16384, `bench_bf16.json`).
+- **The two fixes** (FFMA scale, `EVEN_N`), interleaved on this box against the kernel
+  without them: 10.0%, 9.2% and 6.6% less time at N = 4096, 8192 and 16384
+  (`ablation_fp16.json`, variant `before_fixes`).
+- **vs the 2026-10-03 table** (RunPod, before the fixes; `bench/results/2026-10-03/`):
+  +6% at N=16384 and +11% to +16% below it. FA3 measured 640 and 645 TFLOP/s on the two
+  boxes, so they are comparable.
+- The N=1024 cells for triton-fa2 and sdpa-flash come from a rerun without FlashInfer
+  in the process, and FlashInfer's N=512 cell is launch overhead (see the protocol).
 
-**Occupancy (D=128, 8 warps x 4 stages):** 183 registers per thread, no spills,
-160 KiB of shared memory. Both cap it at one CTA (two warpgroups) per SM.
+**Occupancy (D=128, 8 warps x 4 stages):** 186 registers per thread, no spills, 160
+KiB of shared memory. Both cap it at one CTA (two warpgroups, 8 warps) per SM, and
+Nsight Compute measures 12.5% achieved occupancy, the same as the theoretical one.
 
 ## Where the time goes
 
-At N=16384 the kernel runs at about 430 TFLOP/s, 43% of the H100's 989.4. Nsight
-Compute could not run in the rented container, so the breakdown below comes from
-three sources that need no hardware counters. Everything in this section was
-measured on the kernel as of commit e4b8e5e, before the two fixes at the end of the
-section went in (`bench/ablation.py --variant before_fixes` still runs that kernel,
-bit for bit).
+At N=16384 the kernel runs at 455 TFLOP/s, 46% of the H100's 989.4. Under this kernel
+the GPU sits at its 700 W power cap ("SW power cap" in 74 of 75 `nvidia-smi` samples)
+and the SM clock averages 1.61 GHz instead of the 1.83 GHz behind 989.4, so the
+ceiling on this box is about 870 TFLOP/s and the kernel reaches 52% of it.
 
-**1. The clock.** Under this kernel the GPU sits at its 700 W power cap
-(`nvidia-smi` throttle reason "SW power cap" in 74 of 75 samples over 15 s) and the
-SM clock averages 1.68 GHz, not the 1.83 GHz behind the 989.4 figure. The ceiling
-on this box is about 911 TFLOP/s.
+**Nsight Compute** (2025.3.1; `bench/results/2026-10-04/ncu/`, summarised by
+`python bench/ncu_summary.py bench/results/2026-10-04/ncu`). Our kernel, the kernel
+before its two fixes, the knockout copy with the softmax removed, and FA3, all on the
+default shape at N=16384:
 
-**2. The SASS of one K/V tile** (`bench/sass_stats.py`; the GPU's own build and an
-ahead-of-time sm_90 build on a Mac give the same 447 instructions). Per iteration of
-the stage-1 loop, each of the two warpgroups:
+| | triton-fa2 | before the fixes | matmuls only | FA3 |
+|---|---|---|---|---|
+| duration at ncu's locked 1.44 GHz (ms) | 5.53 | 6.27 | 3.42 | 3.53 |
+| tensor pipe active (% of cycles) | 51.5 | 45.4 | 83.6 | 81.2 |
+| MUFU pipe, which runs `exp2` (%) | 27.4 | 24.2 | 0 | 41.9 |
+| instructions executed (millions) | 1,614 | 1,932 | 574 | 1,081 |
+| issue slots busy (%) | 38.4 | 40.5 | 22.2 | 40.6 |
+| warps per scheduler | 2 | 2 | 2 | 3 |
+| L2 hit rate / DRAM throughput (% of peak) | 98.0 / 1.8 | 98.2 / 1.6 | 98.0 / 2.2 | 97.7 / 2.8 |
+
+- **The gap to FA3 is the tensor pipe's idle time.** It is busy 51.5% of the cycles in
+  our kernel and 81.2% in FA3: a ratio of 1.58, against 1.57 between the durations.
+- **The matmuls themselves are fine.** With the softmax removed, the same schedule keeps
+  the tensor pipe 84% busy, as busy as FA3. What costs time is what sits between them.
+- **Memory is not the limit.** One KV head's K and V at N=16384 are 8 MB; they stay in
+  the 50 MB L2 (98% hit rate) and DRAM runs at 1.8% of its peak.
+- **The fixes:** 16% fewer instructions, tensor pipe 45% -> 52% busy.
+
+Where the warps wait, from PC sampling over the whole kernel, grouped by the step of
+the K/V-tile loop the waiting instruction belongs to (a sample lands on the instruction
+that is waiting, which is not always the one being waited for):
+
+| step | share of samples |
+|---|---|
+| the softmax: `MUFU.EX2`, FP32 adds, multiplies and max, conversions, shuffles | 41% |
+| address arithmetic and loop bookkeeping | 22% |
+| `WARPGROUP.DEPBAR.LE gsb0, 0x0`: wait for the Q K^T matmul | 19% |
+| issuing the matmuls (`HGMMA`, `WARPGROUP.ARRIVE`) | 11% |
+| barriers and K/V copies | 8% |
+
+The one instruction with the most samples is that `WARPGROUP.DEPBAR` (18% of all
+samples). The SASS shows why (`bench/sass_stats.py`; GPU build, stage-1 loop, 371
+instructions per iteration). Each of the two warpgroups:
 
 ```
 DEPBAR.LE / BAR.SYNC               wait for this tile's K/V copies; CTA-wide barrier
 HGMMA.64x64x16.F32 x8              S = Q K^T on the tensor cores (async)
 WARPGROUP.DEPBAR.LE gsb0, 0x0      wait for every matmul in flight
-313 instructions                   softmax: 96 FMUL, 63 FADD, 36 FMNMX, 34 MUFU.EX2, 32 FSEL, ...
+255 instructions                   softmax: 66 FMUL, 36 FMNMX, 34 MUFU.EX2, 32 FFMA, 32 FADD, ...
 HGMMA.64x128x16.F32 x4             O += P V (async, waited at the next iteration)
 BAR.SYNC / LDGSTS x8               barrier, then cp.async copies of a later K/V tile
 ```
 
-The tensor cores get nothing new while a warpgroup runs its softmax, and the two
-warpgroups pass the same barriers, so they reach the softmax at about the same
-time. Per SM and iteration (both warpgroups), each resource alone at its peak would need: tensor cores
-1024 clocks, instruction issue 894, MUFU 544, FP32 pipe 332. Measured: about 2260
-(at 1.68 GHz, iterations spread evenly over the SMs).
+A warpgroup gives the tensor cores nothing new while it runs its softmax, and both
+warpgroups pass the same barriers, so they run their softmaxes at about the same time.
+That is the idle half of the tensor pipe. FA3 runs three warpgroups per CTA: one only
+loads, and the other two take turns (ping-pong), so one's softmax overlaps the other's
+matmuls. That is the next change to try here, with Triton's warp specialization or by
+hand.
 
-**3. Knockouts** (`bench/ablation.py`): copies of the kernel with one kind of work
-removed. The copy with nothing removed is bit-identical to the kernel (tested). The
-time a removal saves is what that work costs where it sits in this schedule; the
-parts overlap, so the savings do not add exactly. Five interleaved rounds, FP16,
-causal, default shape:
+**Knockouts** (`bench/ablation.py`): copies of the kernel with one kind of work
+removed; the copy with nothing removed is bit-identical to the kernel. Five interleaved
+rounds on the same box:
 
 | removed (time saved) | N=4096 | N=8192 | N=16384 |
 |---|---|---|---|
-| `exp2` only (MUFU) | 7.6% | 8.0% | 10.9% |
-| the whole softmax (scale, mask, max, exp, sum, rescale) | 35.1% | 36.3% | 32.5% |
-| HBM traffic (every iteration reads the first K/V tile, served from L2) | 6.2% | -1.3% | 5.8% |
-| softmax and HBM traffic: matmuls and loads from L2 only | 38.7% | 38.6% | 39.2% |
+| `exp2` only (MUFU) | 5.3% | 5.7% | 9.8% |
+| the whole softmax (scale, mask, max, exp, sum, rescale) | 29.4% | 32.5% | 26.9% |
+| reading new K/V tiles (every iteration rereads the first one) | 3.8% | -2.9% | 6.3% |
+| softmax and K/V reads: matmuls only | 34.2% | 34.8% | 33.0% |
 
-At N=8192 the L2-only copy came out 1.3% slower, inside that run's noise. At N=16384
-the kernel and its identical copy differed by 3.8%, so the shares there are good to
-a few percent; N=4096 has IQRs of 0.25%.
+**What Nsight Compute corrected.** Before it could run (2026-10-03, RunPod), the
+breakdown came from the clock, the SASS and these knockouts. Two of its readings were
+wrong:
+- The knockout that rereads the first K/V tile was read as the cost of HBM traffic.
+  DRAM runs at 1.8% of its peak; K and V already came from L2. What that knockout
+  removes is the wait for L2 (the "long scoreboard" stalls).
+- From timings alone, the matmuls-only copy looked like it reached 74% of the peak.
+  That assumed the full kernel's clock. At ncu's locked clock it keeps the tensor pipe
+  84% busy, so under the power cap it probably runs at a lower clock than the full kernel.
 
-Put together for N=16384 (5.38 ms, the mean of the kernel and its copy), adding the
-work back in this order:
-
-| | ms | share |
-|---|---|---|
-| tensor-core work at peak, at 1.68 GHz | 2.41 | 45% |
-| matmuls below peak even with nothing else to do | 0.86 | 16% |
-| HBM traffic not hidden | 0.36 | 7% |
-| softmax not hidden | 1.75 | 33% |
-
-So the softmax is the largest share, and the exponentials are only a third of it.
-The rest is FP32 and select instructions, shuffles and conversions that the
-warpgroups issue while the tensor cores wait. Even with no softmax and K/V served
-from L2, the matmuls reach only 74% of the clock-adjusted peak: each iteration waits
-for Q K^T before it can compute P, and both warpgroups wait at the same barriers.
-HBM traffic matters little at this size.
-
-**Two fixes the SASS points to, now in the kernel:**
-- Stage 1 applied the end-of-sequence mask to every tile (the 32 `FSEL`). When N_kv
-  is a multiple of BLOCK_N, no tile reaches past the end, so it is skipped.
-- The softmax scale is folded into the exponent as one FFMA, `qk * scale - m`, as
-  Triton's tutorial 06 does, instead of scaling every score first.
-
-Together they cut the stage-1 loop from 447 to 371 instructions. Timed in the
-knockout copy on the H100, they made it 10.0%, 8.6% and 9.5% faster at N = 4096, 8192
-and 16384 (452 TFLOP/s at 16384), with the same accuracy. The kernel now compiles to
-exactly the SASS of that copy (ahead-of-time sm_90 build); its own table is the next
-GPU run. The structural fix is FA3's: overlap one warpgroup's softmax with the
-other's matmuls (ping-pong), and tile j's softmax with tile j+1's Q K^T.
-
-**Nsight Compute.** `bench/profile_ncu.sh` runs it with `--set full` on the kernel,
-two knockouts, the kernel before the two fixes, and FA3. It needs a machine where the profiler may read the GPU's
-counters, such as a VM or bare metal with root; in the RunPod container it stops at
-`ERR_NVGPUCTRPERM`. It would measure two things the reading above infers: how busy
-the tensor pipe is, and why warps stall, instruction by instruction.
+The ranking held: the softmax costs more than its exponentials, the tensor pipe waits
+while it runs, and memory matters little. The two fixes the SASS suggested went in
+before this run and are in the table above.
 
 ## GQA head packing
 
@@ -275,28 +281,27 @@ tiles at least 10% better, FA3's rule (`should_pack_gqa`).
 
 Few queries per head against a long K/V, as in decode or speculative decoding:
 batch 16, N_kv = 4096, non-causal, FP16, median microseconds
-(`bench/results/2026-10-03/pack_short.json`):
+(`bench/results/2026-10-04/pack_short.json`):
 
 | N_q | unpacked | packed | speedup | FA3 | FA2 | K/V read rate, packed |
 |---|---|---|---|---|---|---|
-| 1 | 314.1 | 106.4 | 2.95x | 110.1 | 118.3 | 2.52 TB/s |
-| 16 | 314.6 | 106.6 | 2.95x | 111.5 | 361.6 | 2.52 TB/s |
-| 32 | 315.3 | 107.9 | 2.92x | 112.3 | 362.3 | 2.49 TB/s |
-| 64 | 318.4 | 170.1 | 1.87x | 134.3 | 358.8 | 1.58 TB/s |
-| 128 | 328.1 | not chosen | | 242.4 | 372.5 | |
-| 256 | 667.2 | not chosen | | 467.6 | 737.8 | |
+| 1 | 296.2 | 106.5 | 2.78x | 111.9 | 118.7 | 2.52 TB/s |
+| 16 | 296.2 | 105.5 | 2.81x | 112.7 | 359.8 | 2.54 TB/s |
+| 32 | 294.1 | 107.6 | 2.73x | 112.8 | 357.2 | 2.50 TB/s |
+| 64 | 294.2 | 151.2 | 1.95x | 135.7 | 359.4 | 1.78 TB/s |
+| 128 | 307.9 | not chosen | | 248.4 | 386.3 | |
+| 256 | 642.5 | not chosen | | 473.4 | 758.3 | |
 
-- Up to N_q = 32 the packed kernel reads K and V at 2.5 TB/s, 75% of the HBM peak,
-  and is as fast as FA3. FA2 is fast only at N_q = 1, where it moves the query group
-  into the sequence dimension, and 3.4x slower at 16 and 32.
+- Up to N_q = 32 the packed kernel reads K and V at 2.5 TB/s, 75% of the HBM peak, and
+  is slightly faster than FA3. FA2 is fast only at N_q = 1, where it moves the query
+  group into the sequence dimension, and 3.3x to 3.4x slower at 16 and 32.
 - Unpacked, the 512 programs (16 batches x 32 heads) need four waves on 132 SMs.
   Packed, 128 programs run in one wave, limited by HBM bandwidth.
-- At N_q = 64 the packed kernel needs two waves and FA3 is 1.27x faster. From
-  N_q = 128 a head fills its own tile, and forcing packing on changes nothing (329.3
-  and 666.1 µs).
-- Long causal prefill: in the interleaved runs, forcing packing on changed the time
-  by -2.5%, +0.2% and -1.4% at N = 4096, 8192 and 16384. At most a small gain, so
-  leaving it off there, as the rule does, costs little.
+- At N_q = 64 the packed kernel needs two waves and FA3 is 1.11x faster. From N_q = 128
+  a head fills its own tile and the rule leaves packing off.
+- Long causal prefill: in interleaved runs on two boxes, forcing packing on changed the
+  time by -2.5%, +0.2%, -1.4% (RunPod) and -2.7%, -4.7%, -0.9% (Verda) at N = 4096,
+  8192 and 16384. A small gain the rule leaves on the table; why it gains is open.
 
 ## Limitations
 
@@ -306,12 +311,11 @@ batch 16, N_kv = 4096, non-causal, FP16, median microseconds
 - Causal assumes `N_q == N_kv`, i.e. prefill. Decode-style bottom-right alignment,
   variable-length batches and paged KV are out of scope.
 - No split-KV. With few queries and a small batch, the grid can be smaller than the
-  GPU. FA3 is still 1.27x faster at N_q = 64 in the packing table; whether split-KV
+  GPU. FA3 is still 1.11x faster at N_q = 64 in the packing table; whether split-KV
   or its tile shapes explain that was not measured.
 - Plain pointer arithmetic, with no TMA / tensor descriptors. That is a
   deliberate choice for portability and interpreter support, and it is also the
   first thing Hopper wants changed (below).
-- Nsight Compute has not been run on it yet (see above).
 
 ## What I'd change for Hopper (FA3) and Blackwell (FA4)
 
@@ -319,8 +323,8 @@ batch 16, N_kv = 4096, non-causal, FP16, median microseconds
 FA2 reaches 50–73% of peak on A100, but only about 35% on H100 unmodified,
 because its schedule was designed for Ampere. FA3 changed nothing in the maths.
 It rescheduled for Hopper's new units and got back to about 75% of peak (up to
-740 TFLOP/s FP16) [3]. On the box above, under its power cap: FA2 357 TFLOP/s (36%),
-FA3 up to 668 (68%), causal, D=128. FA4 repeats the pattern on Blackwell [4]. The
+740 TFLOP/s FP16) [3]. On the box above, under its power cap: FA2 349 TFLOP/s (35%),
+FA3 up to 661 (67%), causal, D=128. FA4 repeats the pattern on Blackwell [4]. The
 online-softmax recurrence in this repo is the part that carries over. The loop
 structure is the part that does not.
 
@@ -332,10 +336,10 @@ structure is the part that does not.
   The reason is the gap between H100's 989 TFLOP/s dense FP16 matmul peak and
   its roughly 3.9 TFLOP/s for special functions like `exp`.
 
-The measurements in [Where the time goes](#where-the-time-goes) rank these for this
-kernel: the softmax, which runs while the tensor cores wait, is a third of the time
-at N=16384, and the exponentials are a third of that. HBM traffic is 7%, so TMA on
-its own would buy little here; overlapping softmax and matmul is the bigger lever.
+[Where the time goes](#where-the-time-goes) ranks these for this kernel. The tensor
+pipe is idle half the time, while the warpgroups run their softmax, and DRAM runs at
+1.8% of its peak. So TMA on its own would buy little here, and overlapping softmax and
+matmul (warp specialisation, ping-pong) is the lever.
 
 **3. On Blackwell [4]:** the FA4 paper calls the problem *asymmetric hardware
 scaling*: tensor-core throughput doubles, but shared-memory bandwidth and the
@@ -359,9 +363,8 @@ up to 1.3× cuDNN 9.13 and **2.7× Triton** [4]. That gap is the honest ceiling
 for a portable Triton kernel like this one on Blackwell.
 
 **Boundary:** everything in points 2–3 is a known next step, not something
-implemented here. This kernel targets Ampere/Hopper-class GPUs, and its first
-real-hardware validation was an H100 run on 2026-10-02 (see
-[Results](#results) and [WORKLOG](WORKLOG.md)).
+implemented here. This kernel targets Ampere/Hopper-class GPUs; it has run on H100
+SXM three times (2026-10-02 to 10-04, see [Results](#results) and [WORKLOG](WORKLOG.md)).
 
 ## References
 

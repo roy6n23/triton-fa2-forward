@@ -1,0 +1,34 @@
+{
+  "gpu": "NVIDIA H100 80GB HBM3",
+  "compute_capability": "9.0",
+  "sm_count": 132,
+  "driver": "580.178.04",
+  "cuda": "13.0",
+  "cudnn": 92000,
+  "torch": "2.13.0+cu130",
+  "triton": "3.7.1",
+  "flash_attn": null,
+  "flashinfer": "0.6.18.post1",
+  "vllm": "0.30.0",
+  "python": "3.12.3",
+  "date": "2026-10-04T01:58:15"
+}
+  triton-fa2-nopack N=   512     0.019 ms [IQR 0.019-0.020]   110.6 TFLOP/s  K/V  0.11 TB/s
+  triton-fa2-pack   N=   512     0.019 ms [IQR 0.019-0.019]   114.0 TFLOP/s  K/V  0.11 TB/s
+  triton-fa2-nopack N=  2048     0.118 ms [IQR 0.118-0.119]   290.3 TFLOP/s  K/V  0.07 TB/s
+  triton-fa2-pack   N=  2048     0.115 ms [IQR 0.115-0.115]   299.0 TFLOP/s  K/V  0.07 TB/s
+  triton-fa2-nopack N=  8192     1.208 ms [IQR 1.205-1.209]   455.0 TFLOP/s  K/V  0.03 TB/s
+  triton-fa2-pack   N=  8192     1.206 ms [IQR 1.205-1.208]   455.9 TFLOP/s  K/V  0.03 TB/s
+  triton-fa2-nopack N= 16384     4.832 ms [IQR 4.782-4.875]   455.2 TFLOP/s  K/V  0.01 TB/s
+  triton-fa2-pack   N= 16384     4.681 ms [IQR 4.643-4.682]   469.8 TFLOP/s  K/V  0.01 TB/s
+
+B=1 H_q=32 H_kv=8 D=128 fp16 causal=True | median TFLOP/s (IQR ms)
+
+| N | triton-fa2-nopack | triton-fa2-pack |
+|---|---|---|
+| 512 | 110.6 (0.001) | 114.0 (0.000) |
+| 2048 | 290.3 (0.001) | 299.0 (0.001) |
+| 8192 | 455.0 (0.004) | 455.9 (0.003) |
+| 16384 | 455.2 (0.093) | 469.8 (0.040) |
+
+wrote bench/results/2026-10-04/pack_prefill.json

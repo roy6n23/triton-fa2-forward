@@ -1,0 +1,64 @@
+nvdisasm warning : Disassembling Std Elf to Old format or Old Elf to Std format not supported yet, switching to Old format
+1976 instructions
+registers 186/thread, stack 0 B, local (spills) 0 B, shared 160 KiB
+
+loop 1: 371 instructions per iteration
+  by class: fp32 172, int/other 57, uniform 47, mufu 34, convert 16, load/store 15, tensor 12, wait/sync 9, shuffle 8, control 1
+  top opcodes: FMUL 66, FMNMX 36, FADD 36, FFMA 34, MUFU.EX2 34, F2FP.F16.F32.PACK_AB 16, UIADD3.64 14, IMAD 10, HGMMA.64x64x16.F32 8, LEA 8, LEA.HI.X.SX32 8, SEL 8
+  clocks per iteration per SM, each resource alone at peak: tensor 1024, issue 742, mufu 544, fp32 272
+  schedule:
+  DEPBAR.LE
+  BAR.SYNC.DEFER_BLOCKING
+      19 other (4 LDS, 3 UMOV, 2 USHF, 2 ULOP3, 2 ULEA)
+  MEMBAR.ALL.CTA
+       4 other (2 UIADD3, 1 FENCE, 1 UMOV)
+  WARPGROUP.ARRIVE
+  HGMMA.64x64x16.F32 x8 (+22 address/uniform)
+       7 other (3 UIADD3, 2 UMOV, 1 ULOP3, 1 ULEA)
+  WARPGROUP.DEPBAR.LE
+     255 other (66 FMUL, 36 FMNMX, 34 MUFU.EX2, 32 FFMA, 32 FADD)
+  WARPGROUP.ARRIVE
+       1 other (1 FADD)
+  HGMMA.64x128x16.F32
+       1 other (1 SHFL)
+  HGMMA.64x128x16.F32 x3 (+1 address/uniform)
+  BAR.SYNC.DEFER_BLOCKING
+       3 other (3 LDS)
+  LDGSTS.E.BYPASS.128 x4 (+7 address/uniform)
+       1 other (1 LEA)
+  LDGDEPBAR
+  LDGSTS.E.BYPASS.128 x3 (+7 address/uniform)
+       6 other (2 LEA, 2 SHFL, 1 FADD, 1 ISETP)
+  LDGSTS.E.BYPASS.128
+  LDGDEPBAR
+       8 other (2 FADD, 2 IMAD, 2 FFMA, 1 ISETP, 1 BRA)
+
+loop 2: 534 instructions per iteration
+  by class: fp32 234, int/other 150, uniform 55, mufu 34, convert 16, load/store 15, tensor 12, wait/sync 9, shuffle 8, control 1
+  top opcodes: FMUL 66, FSEL 62, FMNMX 36, FADD 36, FFMA 34, MUFU.EX2 34, ISETP.GT.U32.AND 28, ISETP.GT.AND.EX 28, F2FP.F16.F32.PACK_AB 16, UIADD3 13, UIADD3.X 10, IMAD 10
+  clocks per iteration per SM, each resource alone at peak: tensor 1024, issue 1068, mufu 544, fp32 272
+  schedule:
+  DEPBAR.LE
+  BAR.SYNC.DEFER_BLOCKING
+      24 other (4 IADD3, 4 LDS, 3 UMOV, 2 USHF, 2 ULOP3)
+  MEMBAR.ALL.CTA
+      10 other (2 IADD3, 2 UIADD3, 2 IMAD, 2 ISETP, 1 FENCE)
+  WARPGROUP.ARRIVE
+  HGMMA.64x64x16.F32 x8 (+25 address/uniform)
+       9 other (5 UMOV, 2 UIADD3, 1 UISETP, 1 USEL)
+  WARPGROUP.DEPBAR.LE
+     404 other (77 ISETP, 66 FMUL, 62 FSEL, 36 FMNMX, 34 MUFU.EX2)
+  WARPGROUP.ARRIVE
+       1 other (1 FADD)
+  HGMMA.64x128x16.F32 x4 (+2 address/uniform)
+       2 other (1 ULEA, 1 VIADD)
+  BAR.SYNC.DEFER_BLOCKING
+       3 other (3 LDS)
+  LDGSTS.E.BYPASS.128 x4
+       1 other (1 IMAD)
+  LDGDEPBAR
+       1 other (1 IMAD)
+  LDGSTS.E.BYPASS.128 x4 (+9 address/uniform)
+       4 other (2 ISETP, 1 IADD3, 1 SHFL)
+  LDGDEPBAR
+      10 other (4 FADD, 3 SHFL, 2 FFMA, 1 BRA)

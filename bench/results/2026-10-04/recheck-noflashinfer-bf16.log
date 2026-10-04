@@ -1,0 +1,34 @@
+{
+  "gpu": "NVIDIA H100 80GB HBM3",
+  "compute_capability": "9.0",
+  "sm_count": 132,
+  "driver": "580.178.04",
+  "cuda": "13.0",
+  "cudnn": 92000,
+  "torch": "2.13.0+cu130",
+  "triton": "3.7.1",
+  "flash_attn": null,
+  "flashinfer": "0.6.18.post1",
+  "vllm": "0.30.0",
+  "python": "3.12.3",
+  "date": "2026-10-04T02:03:46"
+}
+  triton-fa2        N=   512     0.019 ms [IQR 0.019-0.019]   113.4 TFLOP/s  K/V  0.11 TB/s
+  sdpa-flash        N=   512     0.025 ms [IQR 0.025-0.025]    86.1 TFLOP/s  K/V  0.08 TB/s
+  sdpa-cudnn        N=   512     0.017 ms [IQR 0.016-0.017]   127.2 TFLOP/s  K/V  0.12 TB/s
+  fa2-vllm          N=   512     0.025 ms [IQR 0.025-0.025]    85.8 TFLOP/s  K/V  0.08 TB/s
+  fa3-vllm          N=   512     0.020 ms [IQR 0.020-0.020]   108.1 TFLOP/s  K/V  0.11 TB/s
+  triton-fa2        N=  1024     0.047 ms [IQR 0.047-0.047]   182.3 TFLOP/s  K/V  0.09 TB/s
+  sdpa-flash        N=  1024     0.060 ms [IQR 0.060-0.061]   142.5 TFLOP/s  K/V  0.07 TB/s
+  sdpa-cudnn        N=  1024     0.054 ms [IQR 0.039-0.059]   160.0 TFLOP/s  K/V  0.08 TB/s
+  fa2-vllm          N=  1024     0.058 ms [IQR 0.057-0.058]   149.0 TFLOP/s  K/V  0.07 TB/s
+  fa3-vllm          N=  1024     0.031 ms [IQR 0.030-0.031]   281.4 TFLOP/s  K/V  0.14 TB/s
+
+B=1 H_q=32 H_kv=8 D=128 bf16 causal=True | median TFLOP/s (IQR ms)
+
+| N | triton-fa2 | sdpa-flash | sdpa-cudnn | fa2-vllm | fa3-vllm |
+|---|---|---|---|---|---|
+| 512 | 113.4 (0.001) | 86.1 (0.000) | 127.2 (0.001) | 85.8 (0.000) | 108.1 (0.000) |
+| 1024 | 182.3 (0.000) | 142.5 (0.001) | 160.0 (0.020) | 149.0 (0.001) | 281.4 (0.000) |
+
+wrote bench/results/2026-10-04/recheck_noflashinfer_bf16.json

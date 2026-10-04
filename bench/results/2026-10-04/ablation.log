@@ -1,0 +1,44 @@
+
+N=4096  (production 0.357 ms, 385.3 TFLOP/s)
+| variant | ms (IQR) | vs production | TFLOP/s | output |
+|---|---|---|---|---|
+| production | 0.357 (0.005) | +0.000 (+0.0%) | 385.3 |  |
+| copy | 0.357 (0.005) | -0.000 (-0.1%) | 385.6 | bit-exact |
+| no_exp | 0.338 (0.005) | -0.019 (-5.3%) | 407.0 | max diff nan |
+| no_softmax | 0.252 (0.002) | -0.105 (-29.5%) | 546.2 | max diff 3.84e+03 |
+| kv_l2 | 0.343 (0.004) | -0.014 (-3.8%) | 400.6 | max diff 2.29e+00 |
+| matmul_only | 0.235 (0.002) | -0.122 (-34.2%) | 585.8 | max diff 3.03e+04 |
+| scale_first | 0.364 (0.004) | +0.007 (+2.0%) | 377.7 | max diff 4.88e-04 |
+| mask_every_tile | 0.391 (0.005) | +0.034 (+9.6%) | 351.4 | bit-exact |
+| before_fixes | 0.396 (0.004) | +0.039 (+11.1%) | 347.0 | max diff 4.88e-04 |
+| pack | 0.347 (0.002) | -0.010 (-2.7%) | 396.0 | bit-exact |
+
+N=8192  (production 1.283 ms, 428.6 TFLOP/s)
+| variant | ms (IQR) | vs production | TFLOP/s | output |
+|---|---|---|---|---|
+| production | 1.283 (0.040) | +0.000 (+0.0%) | 428.6 |  |
+| copy | 1.292 (0.011) | +0.010 (+0.8%) | 425.4 | bit-exact |
+| no_exp | 1.215 (0.013) | -0.068 (-5.3%) | 452.7 | max diff nan |
+| no_softmax | 0.869 (0.009) | -0.413 (-32.2%) | 632.5 | max diff 5.36e+03 |
+| kv_l2 | 1.325 (0.015) | +0.042 (+3.3%) | 415.0 | max diff 2.08e+00 |
+| matmul_only | 0.840 (0.014) | -0.443 (-34.5%) | 654.8 | max diff inf |
+| scale_first | 1.407 (0.028) | +0.124 (+9.7%) | 390.8 | max diff 4.88e-04 |
+| mask_every_tile | 1.452 (0.024) | +0.169 (+13.2%) | 378.8 | bit-exact |
+| before_fixes | 1.418 (0.026) | +0.135 (+10.5%) | 387.8 | max diff 4.88e-04 |
+| pack | 1.227 (0.028) | -0.056 (-4.4%) | 448.2 | bit-exact |
+
+N=16384  (production 4.918 ms, 447.2 TFLOP/s)
+| variant | ms (IQR) | vs production | TFLOP/s | output |
+|---|---|---|---|---|
+| production | 4.918 (0.187) | +0.000 (+0.0%) | 447.2 |  |
+| copy | 5.051 (0.068) | +0.133 (+2.7%) | 435.4 | bit-exact |
+| no_exp | 4.496 (0.042) | -0.422 (-8.6%) | 489.1 | max diff nan |
+| no_softmax | 3.645 (0.527) | -1.273 (-25.9%) | 603.3 | max diff 7.98e+03 |
+| kv_l2 | 4.669 (0.260) | -0.249 (-5.1%) | 471.0 | max diff 2.21e+00 |
+| matmul_only | 3.338 (0.283) | -1.580 (-32.1%) | 658.9 | max diff inf |
+| scale_first | 4.866 (0.223) | -0.052 (-1.1%) | 451.9 | max diff 2.44e-04 |
+| mask_every_tile | 5.269 (0.086) | +0.351 (+7.1%) | 417.4 | bit-exact |
+| before_fixes | 5.339 (0.130) | +0.421 (+8.6%) | 411.9 | max diff 2.44e-04 |
+| pack | 4.941 (0.048) | +0.023 (+0.5%) | 445.1 | bit-exact |
+
+wrote bench/results/2026-10-04/ablation_fp16.json

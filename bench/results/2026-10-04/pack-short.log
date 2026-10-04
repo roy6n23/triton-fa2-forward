@@ -1,0 +1,64 @@
+{
+  "gpu": "NVIDIA H100 80GB HBM3",
+  "compute_capability": "9.0",
+  "sm_count": 132,
+  "driver": "580.178.04",
+  "cuda": "13.0",
+  "cudnn": 92000,
+  "torch": "2.13.0+cu130",
+  "triton": "3.7.1",
+  "flash_attn": null,
+  "flashinfer": "0.6.18.post1",
+  "vllm": "0.30.0",
+  "python": "3.12.3",
+  "date": "2026-10-04T01:56:50"
+}
+  triton-fa2-nopack N=     1     0.296 ms [IQR 0.296-0.296]     3.6 TFLOP/s  K/V  0.91 TB/s
+  triton-fa2-pack   N=     1     0.107 ms [IQR 0.106-0.107]    10.1 TFLOP/s  K/V  2.52 TB/s
+  triton-fa2        N=     1     0.106 ms [IQR 0.105-0.106]    10.2 TFLOP/s  K/V  2.54 TB/s
+  fa2-vllm          N=     1     0.119 ms [IQR 0.118-0.119]     9.0 TFLOP/s  K/V  2.26 TB/s
+  fa3-vllm          N=     1     0.112 ms [IQR 0.111-0.112]     9.6 TFLOP/s  K/V  2.40 TB/s
+  sdpa-flash        N=     1     0.109 ms [IQR 0.108-0.109]     9.9 TFLOP/s  K/V  2.47 TB/s
+  triton-fa2-nopack N=    16     0.296 ms [IQR 0.296-0.296]    58.0 TFLOP/s  K/V  0.91 TB/s
+  triton-fa2-pack   N=    16     0.105 ms [IQR 0.105-0.106]   162.9 TFLOP/s  K/V  2.54 TB/s
+  triton-fa2        N=    16     0.105 ms [IQR 0.105-0.106]   163.0 TFLOP/s  K/V  2.55 TB/s
+  fa2-vllm          N=    16     0.360 ms [IQR 0.359-0.360]    47.8 TFLOP/s  K/V  0.75 TB/s
+  fa3-vllm          N=    16     0.113 ms [IQR 0.112-0.113]   152.5 TFLOP/s  K/V  2.38 TB/s
+  sdpa-flash        N=    16     0.386 ms [IQR 0.385-0.386]    44.5 TFLOP/s  K/V  0.70 TB/s
+  triton-fa2-nopack N=    32     0.294 ms [IQR 0.294-0.294]   116.8 TFLOP/s  K/V  0.91 TB/s
+  triton-fa2-pack   N=    32     0.108 ms [IQR 0.107-0.108]   319.5 TFLOP/s  K/V  2.50 TB/s
+  triton-fa2        N=    32     0.107 ms [IQR 0.107-0.108]   320.0 TFLOP/s  K/V  2.50 TB/s
+  fa2-vllm          N=    32     0.357 ms [IQR 0.357-0.358]    96.2 TFLOP/s  K/V  0.75 TB/s
+  fa3-vllm          N=    32     0.113 ms [IQR 0.113-0.113]   304.7 TFLOP/s  K/V  2.38 TB/s
+  sdpa-flash        N=    32     0.383 ms [IQR 0.382-0.383]    89.8 TFLOP/s  K/V  0.70 TB/s
+  triton-fa2-nopack N=    64     0.294 ms [IQR 0.294-0.294]   233.6 TFLOP/s  K/V  0.91 TB/s
+  triton-fa2-pack   N=    64     0.151 ms [IQR 0.151-0.152]   454.5 TFLOP/s  K/V  1.78 TB/s
+  triton-fa2        N=    64     0.151 ms [IQR 0.151-0.151]   455.1 TFLOP/s  K/V  1.78 TB/s
+  fa2-vllm          N=    64     0.359 ms [IQR 0.359-0.360]   191.2 TFLOP/s  K/V  0.75 TB/s
+  fa3-vllm          N=    64     0.136 ms [IQR 0.135-0.136]   506.5 TFLOP/s  K/V  1.98 TB/s
+  sdpa-flash        N=    64     0.385 ms [IQR 0.385-0.386]   178.4 TFLOP/s  K/V  0.70 TB/s
+  triton-fa2-nopack N=   128     0.308 ms [IQR 0.307-0.308]   446.3 TFLOP/s  K/V  0.87 TB/s
+  triton-fa2-pack   N=   128     0.305 ms [IQR 0.299-0.306]   450.7 TFLOP/s  K/V  0.88 TB/s
+  triton-fa2        N=   128     0.321 ms [IQR 0.321-0.321]   428.4 TFLOP/s  K/V  0.84 TB/s
+  fa2-vllm          N=   128     0.386 ms [IQR 0.386-0.387]   355.8 TFLOP/s  K/V  0.69 TB/s
+  fa3-vllm          N=   128     0.248 ms [IQR 0.248-0.249]   553.4 TFLOP/s  K/V  1.08 TB/s
+  sdpa-flash        N=   128     0.426 ms [IQR 0.425-0.426]   322.9 TFLOP/s  K/V  0.63 TB/s
+  triton-fa2-nopack N=   256     0.643 ms [IQR 0.633-0.643]   427.8 TFLOP/s  K/V  0.42 TB/s
+  triton-fa2-pack   N=   256     0.600 ms [IQR 0.599-0.601]   458.3 TFLOP/s  K/V  0.45 TB/s
+  triton-fa2        N=   256     0.639 ms [IQR 0.636-0.639]   430.2 TFLOP/s  K/V  0.42 TB/s
+  fa2-vllm          N=   256     0.758 ms [IQR 0.755-0.759]   362.5 TFLOP/s  K/V  0.35 TB/s
+  fa3-vllm          N=   256     0.473 ms [IQR 0.473-0.474]   580.6 TFLOP/s  K/V  0.57 TB/s
+  sdpa-flash        N=   256     0.823 ms [IQR 0.823-0.823]   334.0 TFLOP/s  K/V  0.33 TB/s
+
+B=16 H_q=32 H_kv=8 D=128 N_kv=4096 fp16 causal=False | median TFLOP/s (IQR ms)
+
+| N | triton-fa2-nopack | triton-fa2-pack | triton-fa2 | fa2-vllm | fa3-vllm | sdpa-flash |
+|---|---|---|---|---|---|---|
+| 1 | 3.6 (0.000) | 10.1 (0.001) | 10.2 (0.001) | 9.0 (0.001) | 9.6 (0.001) | 9.9 (0.001) |
+| 16 | 58.0 (0.000) | 162.9 (0.001) | 163.0 (0.001) | 47.8 (0.001) | 152.5 (0.001) | 44.5 (0.001) |
+| 32 | 116.8 (0.001) | 319.5 (0.001) | 320.0 (0.001) | 96.2 (0.001) | 304.7 (0.000) | 89.8 (0.001) |
+| 64 | 233.6 (0.000) | 454.5 (0.001) | 455.1 (0.001) | 191.2 (0.001) | 506.5 (0.001) | 178.4 (0.001) |
+| 128 | 446.3 (0.001) | 450.7 (0.006) | 428.4 (0.001) | 355.8 (0.001) | 553.4 (0.001) | 322.9 (0.001) |
+| 256 | 427.8 (0.010) | 458.3 (0.001) | 430.2 (0.004) | 362.5 (0.004) | 580.6 (0.001) | 334.0 (0.001) |
+
+wrote bench/results/2026-10-04/pack_short.json

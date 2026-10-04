@@ -1,0 +1,41 @@
+== ncu triton-fa2
+==PROF== Connected to process 966 (/usr/bin/python3.12)
+==WARNING== Unable to access the following 6 metrics: ctc__rx_bytes_data_user.sum, ctc__rx_bytes_data_user.sum.pct_of_peak_sustained_elapsed, ctc__rx_bytes_data_user.sum.per_second, ctc__tx_bytes_data_user.sum, ctc__tx_bytes_data_user.sum.pct_of_peak_sustained_elapsed, ctc__tx_bytes_data_user.sum.per_second.
+
+
+==PROF== Profiling "_attn_fwd": 0%....50%....100% - 38 passes
+==PROF== Disconnected from process 966
+==PROF== Report: /root/triton-fa2-forward/bench/results/2026-10-04/ncu/triton-fa2.ncu-rep
+== ncu matmul_only
+==PROF== Connected to process 1084 (/usr/bin/python3.12)
+==WARNING== Unable to access the following 6 metrics: ctc__rx_bytes_data_user.sum, ctc__rx_bytes_data_user.sum.pct_of_peak_sustained_elapsed, ctc__rx_bytes_data_user.sum.per_second, ctc__tx_bytes_data_user.sum, ctc__tx_bytes_data_user.sum.pct_of_peak_sustained_elapsed, ctc__tx_bytes_data_user.sum.per_second.
+
+
+==PROF== Profiling "_attn_fwd_ablate": 0%....50%....100% - 38 passes
+==PROF== Disconnected from process 1084
+==PROF== Report: /root/triton-fa2-forward/bench/results/2026-10-04/ncu/matmul_only.ncu-rep
+== ncu no_exp
+==PROF== Connected to process 1202 (/usr/bin/python3.12)
+==WARNING== Unable to access the following 6 metrics: ctc__rx_bytes_data_user.sum, ctc__rx_bytes_data_user.sum.pct_of_peak_sustained_elapsed, ctc__rx_bytes_data_user.sum.per_second, ctc__tx_bytes_data_user.sum, ctc__tx_bytes_data_user.sum.pct_of_peak_sustained_elapsed, ctc__tx_bytes_data_user.sum.per_second.
+
+
+==PROF== Profiling "_attn_fwd_ablate": 0%....50%....100% - 38 passes
+==PROF== Disconnected from process 1202
+==PROF== Report: /root/triton-fa2-forward/bench/results/2026-10-04/ncu/no_exp.ncu-rep
+== ncu before_fixes
+==PROF== Connected to process 1320 (/usr/bin/python3.12)
+==WARNING== Unable to access the following 6 metrics: ctc__rx_bytes_data_user.sum, ctc__rx_bytes_data_user.sum.pct_of_peak_sustained_elapsed, ctc__rx_bytes_data_user.sum.per_second, ctc__tx_bytes_data_user.sum, ctc__tx_bytes_data_user.sum.pct_of_peak_sustained_elapsed, ctc__tx_bytes_data_user.sum.per_second.
+
+
+==PROF== Profiling "_attn_fwd_ablate": 0%....50%....100% - 38 passes
+==PROF== Disconnected from process 1320
+==PROF== Report: /root/triton-fa2-forward/bench/results/2026-10-04/ncu/before_fixes.ncu-rep
+== ncu fa3-vllm
+==PROF== Connected to process 1438 (/usr/bin/python3.12)
+==WARNING== Unable to access the following 6 metrics: ctc__rx_bytes_data_user.sum, ctc__rx_bytes_data_user.sum.pct_of_peak_sustained_elapsed, ctc__rx_bytes_data_user.sum.per_second, ctc__tx_bytes_data_user.sum, ctc__tx_bytes_data_user.sum.pct_of_peak_sustained_elapsed, ctc__tx_bytes_data_user.sum.per_second.
+
+
+==PROF== Profiling "void cutlass::device_kernel<flash::enable_sm90_or_later<flash::FlashAttnFwdSm90<flash::CollectiveMainloopFwdSm90<(int)2, cute::tuple<cute::C<(int)1>, cute::C<(int)1>, cute::C<(int)1>>, cute::tuple<cute::C<(int)128>, cute::C<(int)128>, cute::C<(int)128>>, (int)128, cutlass::half_t, float, cutlass::arch::Sm90, (bool)1, (bool)0, (bool)0, (bool)1, (bool)0, (bool)0, (bool)0, (bool)1, (bool)1, (bool)1, (bool)0, (bool)0, cutlass::bfloat16_t, (int)1>, flash::CollectiveEpilogueFwd<cute::tuple<cute::C<(int)128>, cute::C<(int)128>, cute::C<(int)128>>, cute::tuple<cute::C<(int)1>, cute::C<(int)1>, cute::C<(int)1>>, cutlass::half_t, cutlass::arch::Sm90, (int)256, (bool)1, (bool)1, (bool)0, (bool)0, (int)1>, flash::VarlenDynamicPersistentTileScheduler<(int)128, (int)128, (int)256, (int)128, (bool)0, (bool)1, (bool)1, (bool)1, (bool)0, (bool)1>>>>(T1::Params)": 0%....50%....100% - 38 passes
+==PROF== Disconnected from process 1438
+==WARNING== No source files were imported. Check that the target application was compiled with -lineinfo.
+==PROF== Report: /root/triton-fa2-forward/bench/results/2026-10-04/ncu/fa3-vllm.ncu-rep

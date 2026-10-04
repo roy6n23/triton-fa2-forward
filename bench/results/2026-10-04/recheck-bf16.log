@@ -1,0 +1,40 @@
+{
+  "gpu": "NVIDIA H100 80GB HBM3",
+  "compute_capability": "9.0",
+  "sm_count": 132,
+  "driver": "580.178.04",
+  "cuda": "13.0",
+  "cudnn": 92000,
+  "torch": "2.13.0+cu130",
+  "triton": "3.7.1",
+  "flash_attn": null,
+  "flashinfer": "0.6.18.post1",
+  "vllm": "0.30.0",
+  "python": "3.12.3",
+  "date": "2026-10-04T02:01:37"
+}
+  triton-fa2        N=   512     0.019 ms [IQR 0.019-0.019]   114.2 TFLOP/s  K/V  0.11 TB/s
+  sdpa-flash        N=   512     0.025 ms [IQR 0.025-0.025]    86.4 TFLOP/s  K/V  0.08 TB/s
+  sdpa-cudnn        N=   512     0.017 ms [IQR 0.016-0.017]   128.8 TFLOP/s  K/V  0.13 TB/s
+  skip flash-attn        N=   512: ModuleNotFoundError: No module named 'flash_attn'
+  skip flash-attn-3      N=   512: ModuleNotFoundError: No module named 'flash_attn_interface'
+  fa2-vllm          N=   512     0.025 ms [IQR 0.025-0.025]    85.7 TFLOP/s  K/V  0.08 TB/s
+  fa3-vllm          N=   512     0.020 ms [IQR 0.020-0.020]   108.0 TFLOP/s  K/V  0.11 TB/s
+  flashinfer        N=   512     0.101 ms [IQR 0.085-0.127]    21.3 TFLOP/s  K/V  0.02 TB/s
+  triton-fa2        N=  1024     0.116 ms [IQR 0.109-0.139]    74.1 TFLOP/s  K/V  0.04 TB/s
+  sdpa-flash        N=  1024     0.100 ms [IQR 0.092-0.133]    86.3 TFLOP/s  K/V  0.04 TB/s
+  sdpa-cudnn        N=  1024     0.035 ms [IQR 0.034-0.036]   245.3 TFLOP/s  K/V  0.12 TB/s
+  skip flash-attn        N=  1024: ModuleNotFoundError: No module named 'flash_attn'
+  skip flash-attn-3      N=  1024: ModuleNotFoundError: No module named 'flash_attn_interface'
+  fa2-vllm          N=  1024     0.057 ms [IQR 0.056-0.058]   150.0 TFLOP/s  K/V  0.07 TB/s
+  fa3-vllm          N=  1024     0.031 ms [IQR 0.031-0.031]   278.6 TFLOP/s  K/V  0.14 TB/s
+  flashinfer        N=  1024     0.035 ms [IQR 0.034-0.035]   248.3 TFLOP/s  K/V  0.12 TB/s
+
+B=1 H_q=32 H_kv=8 D=128 bf16 causal=True | median TFLOP/s (IQR ms)
+
+| N | triton-fa2 | sdpa-flash | sdpa-cudnn | fa2-vllm | fa3-vllm | flashinfer |
+|---|---|---|---|---|---|---|
+| 512 | 114.2 (0.000) | 86.4 (0.000) | 128.8 (0.001) | 85.7 (0.001) | 108.0 (0.001) | 21.3 (0.042) |
+| 1024 | 74.1 (0.030) | 86.3 (0.041) | 245.3 (0.002) | 150.0 (0.002) | 278.6 (0.000) | 248.3 (0.000) |
+
+wrote bench/results/2026-10-04/recheck_bf16.json

@@ -1,3 +1,6 @@
 __pycache__/
 .pytest_cache/
 *.egg-info/
+
+# Nsight Compute reports are release assets (see bench/results/<date>/ncu/README.md); the CSV exports stay in git
+*.ncu-rep
